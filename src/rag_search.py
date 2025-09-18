@@ -47,7 +47,7 @@ def rag_read(query: str) -> str:
 def add_search_to_knowledge(query: str, search_result: str, knowledge_path: Optional[Path] = None) -> bool:
     try:
         if knowledge_path is None:
-            knowledge_path = Path("./src/functions/knowledge.txt")
+            knowledge_path = Path("./src/knowledge.txt")
 
         current_knowledge = ""
         if knowledge_path.exists():

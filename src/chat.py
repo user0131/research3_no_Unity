@@ -14,6 +14,7 @@ from src.rag_search import (
     search_and_summarize,
 )
 from src.inf_provider import InfProvider
+from src.time_manager import TimeManager
 
 load_dotenv()
 
@@ -28,6 +29,9 @@ class ChatWithMemory:
         self.conversation_history: List[Dict[str, str]] = []
         self.knowledge_path = Path("./src/knowledge.txt")
         self.inf_provider = InfProvider()  # タスク管理システムを初期化
+
+        # 時刻管理システムを初期化（コールバックでスケジュール情報をチェック）
+        self.time_manager = TimeManager(start_time="10:30", callback=self.check_scheduled_infos)
 
     def _build_system_prompt(self) -> str:
         """システムプロンプトを構築"""
@@ -118,7 +122,6 @@ class ChatWithMemory:
         return search_and_summarize(
             query=query,
             conversation_history=self.conversation_history,
-            system_content=self._build_system_prompt(),
             knowledge_path=self.knowledge_path
         )
 
@@ -131,19 +134,16 @@ class ChatWithMemory:
             "type": "function",
             "function": {
                 "name": "create_csv_file",
-                "description": "form_spec(JSON: columns/rows) もしくは columns/rows を直接指定して CSV を生成し、保存パスを返す。",
+                "description": "columns/rows を指定して CSV を生成し、保存パスを返す。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "filename": {"type": "string", "description": "保存ファイル名。日本語名可", "default": "data.csv"},
-                        "form_spec": {"type": "object", "description": "CSVテンプレのスキーマ（columns/rows/description/delimiter/quotechar）"},
-                        "columns": {"type": "array", "items": {"type": "string"}, "description": "ヘッダ行（form_spec の代替）"},
+                        "columns": {"type": "array", "items": {"type": "string"}, "description": "ヘッダ行"},
                         "rows": {"type": "array", "items": {"type": "array", "items": {}}, "description": "初期データ行（任意）"},
-                        "description": {"type": "string", "description": "knowledge.txt 用の説明（任意）"},
-                        "delimiter": {"type": "string", "description": "区切り文字（既定 ,）"},
-                        "quotechar": {"type": "string", "description": "クォート文字（既定 \")"}
+                        "description": {"type": "string", "description": "knowledge.txt 用の説明（任意）"}
                     },
-                    "required": []
+                    "required": ["columns"]
                 }
             }
         })
@@ -153,7 +153,7 @@ class ChatWithMemory:
             "type": "function",
             "function": {
                 "name": "update_csv_from_knowledge",
-                "description": "knowledge.txt に記録されたCSVから対象を選び、指示に基づく更新（列追加/行追記/セル更新）を行って保存する。update_spec を直接渡してもよい。",
+                "description": "knowledge.txt に記録されたCSVから対象を選び、指示に基づく更新（列追加/行追記/セル更新）を行って保存する。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -163,52 +163,45 @@ class ChatWithMemory:
                         },
                         "update_spec": {
                             "type": "object",
-                            "description": "更新計画。LLMが自動設計して渡すことを想定。",
+                            "description": "更新計画（任意）。指定しない場合はinstructionからLLMが自動生成。",
                             "properties": {
-                                "filename": {"type": "string", "description": "更新対象CSVのフルパス。knowledgeの候補以外は不可。"},
-                                "select_by_description": {"type": "string", "description": "説明/タイトルから選ぶキーワード（filenameが無い場合）"},
-                                "delimiter": {"type": "string"},
-                                "quotechar": {"type": "string"},
+                                "filename": {"type": "string", "description": "更新対象CSVファイル名"},
                                 "add_columns": {
                                     "type": "array",
-                                    "description": "列の追加。全既存行に default を埋める。",
                                     "items": {
                                         "type": "object",
                                         "properties": {
                                             "name": {"type": "string"},
-                                            "default": {"description": "既存行に入れる既定値", "nullable": True},
-                                            "position": {"type": "string", "enum": ["start","end"], "default": "end"},
-                                            "after": {"type": "string", "description": "この列の直後に挿入（positionより優先）"}
+                                            "default": {"description": "既存行の既定値"},
+                                            "position": {"type": "string", "enum": ["start", "end"]},
+                                            "after": {"type": "string", "description": "この列の直後に挿入"}
                                         },
                                         "required": ["name"]
                                     }
                                 },
                                 "append_rows": {
                                     "type": "array",
-                                    "description": "行の追記。headers/rows または objects のいずれか（両方可）。",
                                     "items": {
                                         "type": "object",
                                         "properties": {
-                                            "headers": {"type": "array", "items": {"type": "string"}},
-                                            "rows": {"type": "array", "items": {"type": "array", "items": {}}},
                                             "objects": {"type": "array", "items": {"type": "object"}}
-                                        }
+                                        },
+                                        "required": ["objects"]
                                     }
                                 },
                                 "update_cells": {
                                     "type": "array",
-                                    "description": "任意セルを書き換え（行インデックス基準）。",
                                     "items": {
                                         "type": "object",
                                         "properties": {
-                                            "row_index": {"type": "integer", "description": "0始まりでヘッダーを除いたデータ行のインデックス"},
-                                            "column": {"type": "string", "description": "列名"},
+                                            "row_index": {"type": "integer"},
+                                            "column": {"type": "string"},
                                             "value": {"description": "書き込む値"}
                                         },
-                                        "required": ["row_index","column","value"]
+                                        "required": ["row_index", "column", "value"]
                                     }
                                 },
-                                "save_as": {"type": "string", "description": "別名保存先（任意）"}
+                                "save_as": {"type": "string", "description": "別名保存先（任意）。指定しない場合は元ファイルを更新"}
                             }
                         }
                     },
@@ -278,16 +271,29 @@ class ChatWithMemory:
 
         return assistant_message
 
+    def check_scheduled_infos(self):
+        """スケジュール情報をチェックして表示"""
+        # TimeManagerの時刻をInfProviderに同期
+        self.inf_provider.simulation_time = self.time_manager.get_current_time()
+
+        infos = self.inf_provider.check_scheduled_infos()
+        if infos:
+            for info in infos:
+                print(f"\n📢 【{info.source}】{info.subject}")
+                print(f"   {info.content}")
+            print()
+        return len(infos) > 0
+
 
 def main():
     print("command:")
     print("   /clear   - 会話履歴をクリア")
     print("   /history - 会話履歴を表示")
-    print("   /tasks   - 現在のタスクを表示")
+    print("   /time    - 現在時刻を表示")
     print("   /exit    - 終了")
-
     try:
         chat = ChatWithMemory()
+        print(f"⏰ 災害対応訓練開始 - 現在時刻: {chat.time_manager.get_current_time()}")
     except Exception as e:
         print(f"error: {e}")
         return
@@ -314,6 +320,10 @@ def main():
                 else:
                     print("会話履歴はありません")
                 print()
+                continue
+            elif user_input.lower() == "/time":
+                current_time = chat.time_manager.get_current_time()
+                print(f"⏰ 現在時刻: {current_time}")
                 continue
 
             elif user_input:

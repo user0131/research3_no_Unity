@@ -1,20 +1,7 @@
-import json
-import random
-import time
 import csv
-from datetime import datetime
-from typing import List, Dict, Optional, Tuple
+from typing import List
 from pathlib import Path
-from openai import OpenAI
-from pydantic import BaseModel, Field
-
-
-class Task(BaseModel):
-    """タスク定義"""
-    content: str
-    created_at: str
-    completed: bool = False
-    completed_at: Optional[str] = None
+from pydantic import BaseModel
 
 
 class ScheduledInfo(BaseModel):
@@ -26,30 +13,16 @@ class ScheduledInfo(BaseModel):
     delivered: bool = False  # 配信済みフラグ
 
 
-class TaskQueue(BaseModel):
-    """タスクキュー"""
-    tasks: List[Task] = []
+class InfoQueue(BaseModel):
+    """情報キュー"""
     scheduled_infos: List[ScheduledInfo] = []  # スケジュール情報リスト
-    last_scheduled_check: Optional[str] = None  # 最後にチェックした時刻
 
 
-class TaskManager:
-    """タスク管理システム"""
+class InfProvider:
+    """情報付与システム"""
 
-    def __init__(self, csv_file: str = "./config/push_tasks/付与情報.csv"):
-        self.csv_file = Path(task_file)
-        self.task_file.parent.mkdir(parents=True, exist_ok=True)
-        self.queue = self._load_queue()
-        self.client = None
-        api_key = None
-        try:
-            import os
-            api_key = os.environ.get('OPENAI_API_KEY')
-        except:
-            pass
-        if api_key:
-            self.client = OpenAI(api_key=api_key)
-
+    def __init__(self):
+        self.queue = InfoQueue()
         # スケジュール情報をCSVから読み込み
         self._load_scheduled_infos()
 
@@ -72,7 +45,7 @@ class TaskManager:
                             subject=row['件名'],
                             content=row['付与内容']
                         )
-                        # 既存のスケジュール情報と重複しないか確認
+                        # 既存の付与内容と重複しないか確認
                         exists = any(
                             s.time_str == info.time_str and
                             s.source == info.source and
@@ -81,9 +54,8 @@ class TaskManager:
                         )
                         if not exists:
                             self.queue.scheduled_infos.append(info)
-            self._save_queue()
         except Exception as e:
-            print(f"スケジュール情報の読み込みエラー: {e}")
+            print(f"付与内容情報の読み込みエラー: {e}")
 
     def check_scheduled_infos(self) -> List[ScheduledInfo]:
         """
@@ -92,8 +64,8 @@ class TaskManager:
         Returns:
             配信すべき情報のリスト
         """
-        current_time = datetime.now()
-        current_time_str = current_time.strftime("%H:%M")
+        # 災害対応訓練用の模擬時刻を使用
+        current_time_str = self.simulation_time
         delivered_infos = []
 
         for info in self.queue.scheduled_infos:
@@ -101,8 +73,5 @@ class TaskManager:
                 # 時刻が過ぎていて未配信の情報を配信
                 delivered_infos.append(info)
                 info.delivered = True
-
-        if delivered_infos:
-            self._save_queue()
 
         return delivered_infos
