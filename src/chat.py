@@ -99,11 +99,11 @@ class ChatWithMemory:
             return "未対応のツールが呼ばれました。"
 
     def execute_task_with_delay(self, task_name: str, result_message: str) -> str:
-        """タスクを実行し、5分後の戻り時刻を設定"""
+        """タスクを実行し、2分後の戻り時刻を設定"""
         from datetime import datetime, timedelta
 
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-        return_time = current_time + timedelta(minutes=5)
+        return_time = current_time + timedelta(minutes=2)
         self.away_until_time = return_time.strftime("%H:%M")
         self.current_task_description = task_name
 
@@ -114,7 +114,7 @@ class ChatWithMemory:
         from datetime import datetime, timedelta
 
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-        return_time = current_time + timedelta(minutes=5)
+        return_time = current_time + timedelta(minutes=2)
         self.away_until_time = return_time.strftime("%H:%M")
         self.current_task_description = "資料調査"
         self.document_search_result = result_message  # 検索結果を保存
@@ -329,7 +329,7 @@ class ChatWithMemory:
                     # 先に行ってきますメッセージを返す（この時点では検索は実行しない）
                     from datetime import datetime, timedelta
                     current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-                    return_time = current_time + timedelta(minutes=5)
+                    return_time = current_time + timedelta(minutes=2)
                     self.away_until_time = return_time.strftime("%H:%M")
                     self.current_task_description = "資料調査"
                     # 検索クエリを保存して後で実行
@@ -360,18 +360,21 @@ class ChatWithMemory:
         if self.away_until_time and current_time >= self.away_until_time:
             task_name = self.current_task_description or "業務"
 
-            # 文書検索の場合は結果も表示
-            if task_name == "資料調査" and self.document_search_result:
-                return_message = f"{task_name}から戻りました！\n\n{self.document_search_result}"
+            # 文書検索の場合は実際に検索を実行してから結果を表示
+            if task_name == "資料調査" and self.pending_search_query:
+                # 戻り時刻になったので実際に検索を実行
+                result = self.read_document(self.pending_search_query)
+                return_message = f"{task_name}から戻りました！\n\n{result}"
                 print(f"\n{return_message}")
                 self.add_message("assistant", return_message)
-                self.document_search_result = None
+                self.pending_search_query = None
             else:
                 print(f"\n{task_name}から戻りました！")
                 self.add_message("assistant", f"{task_name}から戻りました！")
 
             self.away_until_time = None
             self.current_task_description = None
+            self.document_search_result = None
 
         # 会話中のみ情報付与を一時停止（離席中は情報付与継続）
         if self.in_conversation:
