@@ -6,7 +6,7 @@ from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
-from src.models_forms import (
+from src.csv_operations import (
     create_csv_file,
     update_csv_from_knowledge,
 )
@@ -18,12 +18,6 @@ from src.inf_provider import InfProvider
 load_dotenv()
 
 
-
-
-
-# ------------------------------------------------------------
-# メイン：チャット（ツール：作成/検索/更新）
-# ------------------------------------------------------------
 class ChatWithMemory:
     def __init__(self):
         api_key = os.environ.get('OPENAI_API_KEY')
@@ -35,8 +29,12 @@ class ChatWithMemory:
         self.knowledge_path = Path("./src/knowledge.txt")
         self.inf_provider = InfProvider()  # タスク管理システムを初期化
 
+    def _build_system_prompt(self) -> str:
+        """システムプロンプトを構築"""
         knowledge_content = self.knowledge()
-        self.base_system_content = f"""
+        conv_log = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self.conversation_history[-50:]])  # 最新50件
+
+        return f"""
 あなたはUSERと一緒に災害対応の仕事を行う枚方市の災害対応職員（人間）です。
 地震を想定した避難訓練をUSERと二人で行っています。あなたは相手の話を聞き、簡潔に返答します。
 
@@ -54,6 +52,39 @@ class ChatWithMemory:
 ## これまでの会話履歴
 {conv_log}
 """
+
+    def _build_messages_for_api(self, user_message: str = None) -> List[Dict[str, str]]:
+        """API用のメッセージリストを構築"""
+        messages = []
+
+        # システムプロンプト
+        messages.append({"role": "system", "content": self._build_system_prompt()})
+
+        # 過去の会話(role付き)を追加
+        messages.extend(self.conversation_history)
+
+        # ユーザーメッセージがあれば(2回目以降)新たに追加
+        if user_message:
+            messages.append({"role": "user", "content": user_message})
+
+        # ツール使用のヒントを追加
+        messages.append({
+            "role": "system",
+            "content": "CSVの作成依頼なら create_csv_file、更新依頼なら update_csv_from_knowledge、調査許可があるなら read_document を呼び出す。"
+        })
+
+        return messages
+
+    def _create_tool_response(self, tool_name: str, result: any) -> str:
+        """ツール実行結果からレスポンスメッセージを作成"""
+        if tool_name == "create_csv_file":
+            return f"CSVテンプレートを作成しました。保存先は「{result}」です。"
+        elif tool_name == "update_csv_from_knowledge":
+            return f"CSVを更新しました。保存先は「{result}」です。"
+        elif tool_name == "read_document":
+            return result  # search_and_summarizeの結果をそのまま返す（ちゃんと会話文になってるはず）
+        else:
+            return "未対応のツールが呼ばれました。"
 
     def add_message(self, role: str, content: str):
         self.conversation_history.append({"role": role, "content": content})
@@ -82,11 +113,12 @@ class ChatWithMemory:
 
     # --- 枚方市防災計画RAG 検索 ---
     def read_document(self, query: str = "") -> str:
-        # 検索して要約済みの結果を返す
+    
+        # 検索して要約済みの結果を返す。knowledgeに記憶を追加してもいる。
         return search_and_summarize(
             query=query,
             conversation_history=self.conversation_history,
-            system_content=self.base_system_content,
+            system_content=self._build_system_prompt(),
             knowledge_path=self.knowledge_path
         )
 
@@ -163,7 +195,7 @@ class ChatWithMemory:
                                         }
                                     }
                                 },
-                                "set_cells": {
+                                "update_cells": {
                                     "type": "array",
                                     "description": "任意セルを書き換え（行インデックス基準）。",
                                     "items": {
@@ -190,7 +222,7 @@ class ChatWithMemory:
             "type": "function",
             "function": {
                 "name": "read_document",
-                "description": "RAG検索。枚方市の地震災害関連ドキュメントから、章・節・ページを含む根拠付きの抜粋を返す。",
+                "description": "RAG検索。枚方市の地震災害関連ドキュメントから、地震の災害対応のマニュアルを取得する",
                 "parameters": {
                     "type": "object",
                     "properties": {"query": {"type": "string", "description": "検索クエリ"}},
@@ -202,61 +234,53 @@ class ChatWithMemory:
         return defs
 
     def send_message(self, user_message: str) -> str:
+        # ユーザーメッセージを履歴に追加
         self.add_message("user", user_message)
 
-        # システムプロンプトにタスクを追加
-        system_content_with_tasks = self.base_system_content
+        # API用メッセージを構築
+        messages = self._build_messages_for_api()
 
-        system_prompt = {"role": "system", "content": system_content_with_tasks}
-        messages = [system_prompt] + self.conversation_history
-
+        # OpenAI APIを呼び出し
         response = self.client.chat.completions.create(
             model="gpt-5-mini",
-            messages=messages + [
-                {"role": "system", "content":
-                 "CSVの作成依頼なら create_csv_file、更新依頼なら update_csv_from_knowledge、"
-                 "調査許可があるなら read_document を呼び出す。"}
-            ],
+            messages=messages,
             tools=self.get_function_definitions(),
             tool_choice="auto"
         )
 
         response_message = response.choices[0].message
 
+        # ツール呼び出しがあれば実行
         if getattr(response_message, "tool_calls", None):
             tool_call = response_message.tool_calls[0]
             fname = tool_call.function.name
             args = json.loads(tool_call.function.arguments or "{}")
 
+            # ツールを実行
             if fname == "create_csv_file":
-                filepath = create_csv_file(**args)
-                assistant_message = f"CSVテンプレートを作成しました。保存先は「{filepath}」です。"
-
+                result = create_csv_file(**args)
             elif fname == "update_csv_from_knowledge":
-                saved = update_csv_from_knowledge(**args)
-                assistant_message = f"CSVを更新しました。保存先は「{saved}」です。"
-
+                result = update_csv_from_knowledge(**args)
             elif fname == "read_document":
                 query = (args.get("query") or "").strip()
                 print(f"📚 調べています... (キーワード: {query})")
-                # search_and_summarizeが要約済みの結果を返す
-                assistant_message = self.read_document(query)
-
+                result = self.read_document(query)
             else:
-                assistant_message = "未対応のツールが呼ばれました。"
+                result = None
+
+            # レスポンスメッセージを作成
+            assistant_message = self._create_tool_response(fname, result)
         else:
             assistant_message = response_message.content
 
+        # アシスタントメッセージを履歴に追加
         self.add_message("assistant", assistant_message)
 
         return assistant_message
 
 
-# ------------------------------------------------------------
-# CLI
-# ------------------------------------------------------------
 def main():
-    print("commanda:")
+    print("command:")
     print("   /clear   - 会話履歴をクリア")
     print("   /history - 会話履歴を表示")
     print("   /tasks   - 現在のタスクを表示")

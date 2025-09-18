@@ -1,6 +1,3 @@
-# -*- coding: utf-8 -*-
-# pip install langchain langchain-community langchain-openai pypdf faiss-cpu tiktoken python-dotenv
-
 import io
 import os
 import re

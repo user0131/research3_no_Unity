@@ -1,8 +1,3 @@
-"""
-タスクキュー管理システム
-災害対応訓練中に定期的にタスクが発生し、動的に管理される
-"""
-
 import json
 import random
 import time
