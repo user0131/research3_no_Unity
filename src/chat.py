@@ -6,15 +6,15 @@ from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
 
-from src.csv_operations import (
+from csv_operations import (
     create_csv_file,
     update_csv_from_knowledge,
 )
-from src.rag_search import (
+from rag_search import (
     search_and_summarize,
 )
-from src.inf_provider import InfProvider
-from src.time_manager import TimeManager
+from inf_provider import InfProvider
+from time_manager import TimeManager
 
 load_dotenv()
 
@@ -29,9 +29,13 @@ class ChatWithMemory:
         self.conversation_history: List[Dict[str, str]] = []
         self.knowledge_path = Path("./src/knowledge.txt")
         self.inf_provider = InfProvider()  # タスク管理システムを初期化
-
-        # 時刻管理システムを初期化（コールバックでスケジュール情報をチェック）
-        self.time_manager = TimeManager(start_time="10:30", callback=self.check_scheduled_infos)
+        self.in_conversation = False  # 会話中フラグ
+        self.away_until_time = None  # 戻り時刻（HH:MM形式）
+        self.current_task_description = None  # 現在のタスク内容　ロードや、csv更新や、他のタスクの内容をここに入れる。
+        self.document_search_result = None  # 文書検索の結果を保存
+        self.pending_search_query = None  # 実行待ちの検索クエリ
+        # 時刻管理システムを初期化（callbackで付与情報をチェック）
+        self.time_manager = TimeManager(start_time="10:30", callback=self.check_scheduled_infos, speed_multiplier=3.0)
 
     def _build_system_prompt(self) -> str:
         """システムプロンプトを構築"""
@@ -42,13 +46,21 @@ class ChatWithMemory:
 あなたはUSERと一緒に災害対応の仕事を行う枚方市の災害対応職員（人間）です。
 地震を想定した避難訓練をUSERと二人で行っています。あなたは相手の話を聞き、簡潔に返答します。
 
-厳格なルール：
-- あなたは「あなたが知っている知識」と「これまでの会話履歴」から得た情報以外、災害情報に関する知識は知りません。
-- 知らないことは推測せず分かりません。調べましょうか？と確認し、了承が得られた場合のみ `read_document` を使います。
-- CSVテンプレ作成は、会話から `form_spec`（JSON：columns/rows）を設計するか、`columns/rows` を直接受け取り、`create_csv_file` を呼びます。
-- 追記依頼が来たら、`update_csv_from_knowledge` を呼び、knowledge に保存されたCSVの中から適切なファイルを選び、計画に基づき更新を行います。
-- 作成・更新・検索の結果は、knowledge にパスと説明/計画や検索ログを追記します。
-- 箇条書き禁止。音声会話を想定した自然な口調で。
+## 災害対応ルール：
+- **会話スタイル**: 同僚との自然な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。
+- **情報の扱い**: 付与された情報と会話履歴のみを基に対応。推測や憶測は避ける。
+- **不明な事項**: 手持ちの情報にない場合は、状況に応じて自然に調査を提案する程度。
+- **作業依頼**: 明確に何かの作業を頼まれた場合のみ「今○○に行ってきてもいいですか？」と確認し、承認されてから実行。
+
+## 利用可能なツール
+- **read_document**: 枚方市の災害対応マニュアルから情報を検索・調査する
+- **create_csv_file**: 新しいCSVファイルを作成する（データ管理用）
+- **update_csv_from_knowledge**: 既存のCSVファイルを更新する（列追加、行追記、セル更新）
+- **other_task**: 上記以外のなタスクを実行する
+
+## 情報付与について
+- 訓練中に時間が経過すると、関係機関や避難所から新しい情報が自動的に付与されます。
+- 【情報付与】と表示される情報は、リアルタイムで入ってくる災害関連の最新情報です。
 
 ## あなたが知っている知識（参考程度）
 {knowledge_content}
@@ -71,24 +83,44 @@ class ChatWithMemory:
         if user_message:
             messages.append({"role": "user", "content": user_message})
 
-        # ツール使用のヒントを追加
-        messages.append({
-            "role": "system",
-            "content": "CSVの作成依頼なら create_csv_file、更新依頼なら update_csv_from_knowledge、調査許可があるなら read_document を呼び出す。"
-        })
-
         return messages
 
     def _create_tool_response(self, tool_name: str, result: any) -> str:
         """ツール実行結果からレスポンスメッセージを作成"""
         if tool_name == "create_csv_file":
-            return f"CSVテンプレートを作成しました。保存先は「{result}」です。"
+            return self.execute_task_with_delay("CSV作成", f"CSVテンプレートを作成しました。保存先は「{result}」です。")
         elif tool_name == "update_csv_from_knowledge":
-            return f"CSVを更新しました。保存先は「{result}」です。"
+            return self.execute_task_with_delay("CSV更新", f"CSVを更新しました。保存先は「{result}」です。")
         elif tool_name == "read_document":
-            return result  # search_and_summarizeの結果をそのまま返す（ちゃんと会話文になってるはず）
+            return self.execute_document_search(result)  # 文書検索用の関数を使用
+        elif tool_name == "other_task":
+            return result  # other_taskは既にexecute_other_taskで処理済み
         else:
             return "未対応のツールが呼ばれました。"
+
+    def execute_task_with_delay(self, task_name: str, result_message: str) -> str:
+        """タスクを実行し、5分後の戻り時刻を設定"""
+        from datetime import datetime, timedelta
+
+        current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
+        return_time = current_time + timedelta(minutes=5)
+        self.away_until_time = return_time.strftime("%H:%M")
+        self.current_task_description = task_name
+
+        return f"{task_name}に行ってきます。{self.away_until_time}頃に戻ります。"
+
+    def execute_document_search(self, result_message: str) -> str:
+        """文書検索を実行し、1分後の戻り時刻を設定して結果を返す"""
+        from datetime import datetime, timedelta
+
+        current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
+        return_time = current_time + timedelta(minutes=5)
+        self.away_until_time = return_time.strftime("%H:%M")
+        self.current_task_description = "資料調査"
+        self.document_search_result = result_message  # 検索結果を保存
+
+        return f"資料調査に行ってきます。{self.away_until_time}頃に戻ります。"
+
 
     def add_message(self, role: str, content: str):
         self.conversation_history.append({"role": role, "content": content})
@@ -111,9 +143,9 @@ class ChatWithMemory:
             new_entry = f"\n\n## {title}\n{content}"
             updated_knowledge = current_knowledge + new_entry
             self.knowledge_path.write_text(updated_knowledge, encoding='utf-8')
-            print(f"📝 知識ベースに追加しました: {title}")
+            print(f"aiエージェントの記憶に次を追加しました: {title}")
         except Exception as e:
-            print(f"知識ベース追加エラー: {e}")
+            print(f"記憶追加エラー: {e}")
 
     # --- 枚方市防災計画RAG 検索 ---
     def read_document(self, query: str = "") -> str:
@@ -153,13 +185,13 @@ class ChatWithMemory:
             "type": "function",
             "function": {
                 "name": "update_csv_from_knowledge",
-                "description": "knowledge.txt に記録されたCSVから対象を選び、指示に基づく更新（列追加/行追記/セル更新）を行って保存する。",
+                "description": "CSVファイルの更新専用ツール。CSVファイルに記録を追加したり更新する場合のみ使用。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "instruction": {
                             "type": "string",
-                            "description": "自然文の指示。例: 『在庫台帳に列「担当者」を追加して、今日の入庫分を1行追記』"
+                            "description": "自然文の、csvの更新に関する指示。"
                         },
                         "update_spec": {
                             "type": "object",
@@ -181,10 +213,15 @@ class ChatWithMemory:
                                 },
                                 "append_rows": {
                                     "type": "array",
+                                    "description": "追加する行データの配列。各要素は必ず {\"objects\": [{行データ1}, {行データ2}, ...]} の形式",
                                     "items": {
                                         "type": "object",
                                         "properties": {
-                                            "objects": {"type": "array", "items": {"type": "object"}}
+                                            "objects": {
+                                                "type": "array",
+                                                "description": "実際の行データの配列。例: [{\"配達ID\": \"001\", \"品目\": \"水\"}, ...]",
+                                                "items": {"type": "object"}
+                                            }
                                         },
                                         "required": ["objects"]
                                     }
@@ -224,63 +261,134 @@ class ChatWithMemory:
             }
         })
 
+        # その他のタスク
+        defs.append({
+            "type": "function",
+            "function": {
+                "name": "other_task",
+                "description": "csv作成・更新、資料調査以外のやる事を実行するtool",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"task_description": {"type": "string", "description": "やる内容を簡潔に"}},
+                    "required": ["task_description"]
+                }
+            }
+        })
+
         return defs
 
     def send_message(self, user_message: str) -> str:
-        # ユーザーメッセージを履歴に追加
-        self.add_message("user", user_message)
+        # 離席中チェック
+        if self.away_until_time:
+            current_time = self.time_manager.get_current_time()
+            if current_time < self.away_until_time:
+                # コンソール表示のみ、会話履歴には追加しない
+                print(f"申し訳ありません、現在別の業務中です。{self.away_until_time}頃に戻る予定です。")
+                return ""
 
-        # API用メッセージを構築
-        messages = self._build_messages_for_api()
+        # 会話中フラグをセット（情報付与を一時停止）
+        self.in_conversation = True
 
-        # OpenAI APIを呼び出し
-        response = self.client.chat.completions.create(
-            model="gpt-5-mini",
-            messages=messages,
-            tools=self.get_function_definitions(),
-            tool_choice="auto"
-        )
+        try:
+            # ユーザーメッセージを履歴に追加
+            self.add_message("user", user_message)
 
-        response_message = response.choices[0].message
+            # API用メッセージを構築
+            messages = self._build_messages_for_api()
 
-        # ツール呼び出しがあれば実行
-        if getattr(response_message, "tool_calls", None):
-            tool_call = response_message.tool_calls[0]
-            fname = tool_call.function.name
-            args = json.loads(tool_call.function.arguments or "{}")
+            # OpenAI APIを呼び出し
+            response = self.client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=messages,
+                tools=self.get_function_definitions(),
+                tool_choice="auto"
+            )
 
-            # ツールを実行
-            if fname == "create_csv_file":
-                result = create_csv_file(**args)
-            elif fname == "update_csv_from_knowledge":
-                result = update_csv_from_knowledge(**args)
-            elif fname == "read_document":
-                query = (args.get("query") or "").strip()
-                print(f"📚 調べています... (キーワード: {query})")
-                result = self.read_document(query)
+            response_message = response.choices[0].message
+
+            # ツール呼び出しがあれば実行
+            if getattr(response_message, "tool_calls", None):
+                tool_call = response_message.tool_calls[0]
+                fname = tool_call.function.name
+                args = json.loads(tool_call.function.arguments or "{}")
+
+                # 先に「行ってきます」メッセージを出力してから実行
+                if fname == "create_csv_file":
+                    # 先に行ってきますメッセージを準備
+                    assistant_message = self.execute_task_with_delay("CSV作成", "")
+                    # その後実際にCSV作成を実行
+                    result = create_csv_file(**args)
+                    # 結果メッセージは戻り時に表示されるので保存不要
+                elif fname == "update_csv_from_knowledge":
+                    # 先に行ってきますメッセージを準備
+                    assistant_message = self.execute_task_with_delay("CSV更新", "")
+                    # その後実際にCSV更新を実行
+                    result = update_csv_from_knowledge(**args)
+                elif fname == "read_document":
+                    query = (args.get("query") or "").strip()
+                    # 先に行ってきますメッセージを返す（この時点では検索は実行しない）
+                    from datetime import datetime, timedelta
+                    current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
+                    return_time = current_time + timedelta(minutes=5)
+                    self.away_until_time = return_time.strftime("%H:%M")
+                    self.current_task_description = "資料調査"
+                    # 検索クエリを保存して後で実行
+                    self.pending_search_query = query
+                    assistant_message = f"資料調査に行ってきます。{self.away_until_time}頃に戻ります。"
+                elif fname == "other_task":
+                    task_description = args.get("task_description", "その他の業務")
+                    assistant_message = self.execute_task_with_delay("その仕事", "")
+                else:
+                    assistant_message = "未対応のツールが呼ばれました。"
             else:
-                result = None
+                assistant_message = response_message.content
 
-            # レスポンスメッセージを作成
-            assistant_message = self._create_tool_response(fname, result)
-        else:
-            assistant_message = response_message.content
+            # アシスタントメッセージを履歴に追加
+            self.add_message("assistant", assistant_message)
 
-        # アシスタントメッセージを履歴に追加
-        self.add_message("assistant", assistant_message)
+            return assistant_message
 
-        return assistant_message
+        finally:
+            # 会話終了後フラグをリセット
+            self.in_conversation = False
 
     def check_scheduled_infos(self):
         """スケジュール情報をチェックして表示"""
+        current_time = self.time_manager.get_current_time()
+
+        # 戻り時刻チェック
+        if self.away_until_time and current_time >= self.away_until_time:
+            task_name = self.current_task_description or "業務"
+
+            # 文書検索の場合は結果も表示
+            if task_name == "資料調査" and self.document_search_result:
+                return_message = f"{task_name}から戻りました！\n\n{self.document_search_result}"
+                print(f"\n{return_message}")
+                self.add_message("assistant", return_message)
+                self.document_search_result = None
+            else:
+                print(f"\n{task_name}から戻りました！")
+                self.add_message("assistant", f"{task_name}から戻りました！")
+
+            self.away_until_time = None
+            self.current_task_description = None
+
+        # 会話中のみ情報付与を一時停止（離席中は情報付与継続）
+        if self.in_conversation:
+            return False
+
         # TimeManagerの時刻をInfProviderに同期
-        self.inf_provider.simulation_time = self.time_manager.get_current_time()
+        self.inf_provider.simulation_time = current_time
 
         infos = self.inf_provider.check_scheduled_infos()
         if infos:
             for info in infos:
-                print(f"\n📢 【{info.source}】{info.subject}")
+                print(f"\n【情報付与】付与元: {info.source} | 件名: {info.subject}")
                 print(f"   {info.content}")
+
+                # 会話ログにsystemメッセージとして追加
+                system_message = f"【情報付与】{info.source}: {info.subject}\n{info.content}"
+                self.add_message("system", system_message)
             print()
         return len(infos) > 0
 
@@ -293,7 +401,7 @@ def main():
     print("   /exit    - 終了")
     try:
         chat = ChatWithMemory()
-        print(f"⏰ 災害対応訓練開始 - 現在時刻: {chat.time_manager.get_current_time()}")
+        print(f"災害対応訓練開始 - 現在時刻: {chat.time_manager.get_current_time()}")
     except Exception as e:
         print(f"error: {e}")
         return
@@ -313,10 +421,14 @@ def main():
                 history = chat.get_conversation_history()
                 if history:
                     print("\nこれまでの会話:")
+                    # 最初のsystemプロンプトをスキップ、2回目以降のsystemは表示
+                    first_system_skipped = False
                     for i, msg in enumerate(history, 1):
                         role = msg["role"].upper()
-                        if role != "SYSTEM":
-                            print(f"{role}: {msg['content']}")
+                        if role == "SYSTEM" and not first_system_skipped:
+                            first_system_skipped = True
+                            continue
+                        print(f"{role}: {msg['content']}")
                 else:
                     print("会話履歴はありません")
                 print()

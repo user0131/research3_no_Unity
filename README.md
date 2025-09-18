@@ -1,4 +1,5 @@
-
+source .venv/bin/activate
+source .env
 
 ## csv(excelでできる仕事)
 ・情報をまとめること（整理）(物資の要請、道路状況)（電話）

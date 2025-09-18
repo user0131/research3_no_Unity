@@ -9,7 +9,7 @@ from openai import OpenAI
 def rag_read(query: str) -> str:
     try:
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-        from src.rag_db_maker import load_retriever
+        from rag_db_maker import load_retriever
         from config.constants import VECTOR_DB_PATH, HIRAKATA_JISIN_VECTOR
 
         db_path = os.path.join(VECTOR_DB_PATH, HIRAKATA_JISIN_VECTOR)
@@ -57,7 +57,7 @@ def add_search_to_knowledge(query: str, search_result: str, knowledge_path: Opti
         updated_knowledge = current_knowledge + new_entry
         knowledge_path.write_text(updated_knowledge, encoding='utf-8')
 
-        print(f"aiエージェントの記憶に追加しました: 【検索】{query}")
+        # print(f"aiエージェントの記憶に追加しました: 【検索】{query}")
         return True
 
     except Exception as e:
