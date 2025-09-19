@@ -34,12 +34,12 @@ class ChatWithMemory:
         self.current_task_description = None  # 現在のタスク内容　ロードや、csv更新や、他のタスクの内容をここに入れる。
         self.document_search_result = None  # 文書検索の結果を保存
         self.pending_search_query = None  # 実行待ちの検索クエリ
-        # 時刻管理システムを初期化（callbackで付与情報をチェック）
+        # 時刻管理システムを初期化（callbackで付与情報をチェック） 時間が変更すればこれを実施する
         self.time_manager = TimeManager(start_time="10:30", callback=self.check_scheduled_infos, speed_multiplier=3.0)
 
     def _build_system_prompt(self) -> str:
         """システムプロンプトを構築"""
-        knowledge_content = self.knowledge()
+        knowledge_content = self.knowledge() # 毎回、新しい内容を読み込んでる
         conv_log = "\n".join([f"{msg['role']}: {msg['content']}" for msg in self.conversation_history[-50:]])  # 最新50件
 
         return f"""
@@ -85,20 +85,27 @@ class ChatWithMemory:
 
         return messages
 
-    def _create_tool_response(self, tool_name: str, result: any) -> str:
+    def _create_tool_response(self, tool_name: str, args: Dict = None) -> str:
         """ツール実行結果からレスポンスメッセージを作成"""
         if tool_name == "create_csv_file":
-            return self.execute_task_with_delay("CSV作成", f"CSVテンプレートを作成しました。保存先は「{result}」です。")
+            # CSV作成時は引数全体を辞書として保存
+            self.pending_search_query = args if args else {}
+            return self.execute_task_with_delay("CSV作成", args)
         elif tool_name == "update_csv_from_knowledge":
-            return self.execute_task_with_delay("CSV更新", f"CSVを更新しました。保存先は「{result}」です。")
+            # CSV更新時も引数全体を辞書として保存
+            self.pending_search_query = args if args else {}
+            return self.execute_task_with_delay("CSV更新", args)
         elif tool_name == "read_document":
-            return self.execute_document_search(result)  # 文書検索用の関数を使用
+            # 文書検索時はクエリを保存
+            if args and "query" in args:
+                self.pending_search_query = args["query"]
+            return self.execute_task_with_delay("資料調査", args)
         elif tool_name == "other_task":
-            return result  # other_taskは既にexecute_other_taskで処理済み
+            return self.execute_task_with_delay("その仕事", args)
         else:
             return "未対応のツールが呼ばれました。"
 
-    def execute_task_with_delay(self, task_name: str, result_message: str) -> str:
+    def execute_task_with_delay(self, task_name: str, args: Dict = None) -> str:
         """タスクを実行し、2分後の戻り時刻を設定"""
         from datetime import datetime, timedelta
 
@@ -107,20 +114,9 @@ class ChatWithMemory:
         self.away_until_time = return_time.strftime("%H:%M")
         self.current_task_description = task_name
 
+        # 引数情報があれば、pending_search_queryは既に設定済み
+        # タスク名と引数を組み合わせてメッセージを生成
         return f"{task_name}に行ってきます。{self.away_until_time}頃に戻ります。"
-
-    def execute_document_search(self, result_message: str) -> str:
-        """文書検索を実行し、1分後の戻り時刻を設定して結果を返す"""
-        from datetime import datetime, timedelta
-
-        current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-        return_time = current_time + timedelta(minutes=2)
-        self.away_until_time = return_time.strftime("%H:%M")
-        self.current_task_description = "資料調査"
-        self.document_search_result = result_message  # 検索結果を保存
-
-        return f"資料調査に行ってきます。{self.away_until_time}頃に戻ります。"
-
 
     def add_message(self, role: str, content: str):
         self.conversation_history.append({"role": role, "content": content})
@@ -252,7 +248,7 @@ class ChatWithMemory:
             "type": "function",
             "function": {
                 "name": "read_document",
-                "description": "RAG検索。枚方市の地震災害関連ドキュメントから、地震の災害対応のマニュアルを取得する",
+                "description": "RAG検索。枚方市の地震災害関連ドキュメントから、地震の災害対応のマニュアルを取得する。資料調査",
                 "parameters": {
                     "type": "object",
                     "properties": {"query": {"type": "string", "description": "検索クエリ"}},
@@ -282,9 +278,9 @@ class ChatWithMemory:
         if self.away_until_time:
             current_time = self.time_manager.get_current_time()
             if current_time < self.away_until_time:
-                # コンソール表示のみ、会話履歴には追加しない
+                # コンソール表示のみ、会話履歴には追加しない。
                 print(f"申し訳ありません、現在別の業務中です。{self.away_until_time}頃に戻る予定です。")
-                return ""
+                return "" # returnとして何も返さない
 
         # 会話中フラグをセット（情報付与を一時停止）
         self.in_conversation = True
@@ -312,34 +308,12 @@ class ChatWithMemory:
                 fname = tool_call.function.name
                 args = json.loads(tool_call.function.arguments or "{}")
 
-                # 先に「行ってきます」メッセージを出力してから実行
-                if fname == "create_csv_file":
-                    # 先に行ってきますメッセージを準備
-                    assistant_message = self.execute_task_with_delay("CSV作成", "")
-                    # その後実際にCSV作成を実行
-                    result = create_csv_file(**args)
-                    # 結果メッセージは戻り時に表示されるので保存不要
-                elif fname == "update_csv_from_knowledge":
-                    # 先に行ってきますメッセージを準備
-                    assistant_message = self.execute_task_with_delay("CSV更新", "")
-                    # その後実際にCSV更新を実行
-                    result = update_csv_from_knowledge(**args)
-                elif fname == "read_document":
-                    query = (args.get("query") or "").strip()
-                    # 先に行ってきますメッセージを返す（この時点では検索は実行しない）
-                    from datetime import datetime, timedelta
-                    current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-                    return_time = current_time + timedelta(minutes=2)
-                    self.away_until_time = return_time.strftime("%H:%M")
-                    self.current_task_description = "資料調査"
-                    # 検索クエリを保存して後で実行
-                    self.pending_search_query = query
-                    assistant_message = f"資料調査に行ってきます。{self.away_until_time}頃に戻ります。"
-                elif fname == "other_task":
-                    task_description = args.get("task_description", "その他の業務")
-                    assistant_message = self.execute_task_with_delay("その仕事", "")
+                if fname:
+                    assistant_message = self._create_tool_response(fname, args) # 〇〇に行ってきます。〇〇分後には戻ります
+
                 else:
-                    assistant_message = "未対応のツールが呼ばれました。"
+                    assistant_message = "no_tool"
+            # なければメッセージを
             else:
                 assistant_message = response_message.content
 
@@ -362,15 +336,36 @@ class ChatWithMemory:
 
             # 文書検索の場合は実際に検索を実行してから結果を表示
             if task_name == "資料調査" and self.pending_search_query:
-                # 戻り時刻になったので実際に検索を実行
                 result = self.read_document(self.pending_search_query)
                 return_message = f"{task_name}から戻りました！\n\n{result}"
                 print(f"\n{return_message}")
                 self.add_message("assistant", return_message)
                 self.pending_search_query = None
+            elif task_name == "CSV作成" and self.pending_search_query:
+                # CSV作成を実行
+                if isinstance(self.pending_search_query, dict):
+                    create_csv_file(**self.pending_search_query)
+                    return_message = f"{task_name}から戻りました！"
+                else:
+                    return_message = f"{task_name}から戻りました！"
+                print(f"\n{return_message}")
+                self.add_message("assistant", return_message)
+                self.pending_search_query = None
+            elif task_name == "CSV更新" and self.pending_search_query:
+                # CSV更新を実行
+                if isinstance(self.pending_search_query, dict):
+                    update_csv_from_knowledge(**self.pending_search_query)
+                    return_message = f"{task_name}から戻りました！"
+                else:
+                    return_message = f"{task_name}から戻りました！"
+                print(f"\n{return_message}")
+                self.add_message("assistant", return_message)
+                self.pending_search_query = None
             else:
-                print(f"\n{task_name}から戻りました！")
-                self.add_message("assistant", f"{task_name}から戻りました！")
+                return_message = f"{task_name}から戻りました！"
+                print(f"\n{return_message}")
+                self.add_message("assistant", return_message)
+                self.pending_search_query = None
 
             self.away_until_time = None
             self.current_task_description = None
@@ -438,7 +433,7 @@ def main():
                 continue
             elif user_input.lower() == "/time":
                 current_time = chat.time_manager.get_current_time()
-                print(f"⏰ 現在時刻: {current_time}")
+                print(f"現在時刻: {current_time}")
                 continue
 
             elif user_input:
