@@ -86,7 +86,7 @@ def search_and_summarize(
             conversation_history = []
 
         system_content = """
-あなたはUSERと一緒に災害対応の仕事を行う枚方市の災害対応職員（人間）です。
+あなたはUSERと一緒に災害対応の仕事を行う枚方市の災害対応職員（人間）です。あなたは情報管理担当の職員です。あなたは"information_manager"です。
 地震を想定した避難訓練をUSERと二人で行っています。
 検索結果を根拠に、会話文で簡潔に答えてください。
 """
@@ -94,7 +94,7 @@ def search_and_summarize(
         messages = [
             {"role": "system", "content": system_content},
             *conversation_history,
-            {"role": "assistant", "content": f"今、『{query}』について資料を検索しました。"},
+            {"role": "user", "name":"information_manager", "content": f"今、『{query}』について資料を検索しました。"},
             {"role": "system", "content": "以下の検索結果を根拠に、会話文で簡潔に答えてください。" + "\n\n【検索結果】\n" + doc_content}
         ]
 
