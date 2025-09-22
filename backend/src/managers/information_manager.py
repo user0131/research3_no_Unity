@@ -17,7 +17,7 @@ class InformationManager:
 
     def __init__(self, client: OpenAI, time_manager):
         self.client = client
-        self.knowledge_path = Path("./src/knowledge_information.txt")
+        self.knowledge_path = Path("./src/knowledge/knowledge_information.txt")
         self.csv_base_path = Path("./csv/information")
         self.time_manager = time_manager
         self.in_conversation = False
@@ -43,7 +43,7 @@ class InformationManager:
 - systemロールにて、【情報付与】と表示されて会話履歴に入る情報は、リアルタイムで入ってくる災害関連の最新情報です。
 
 ## あなたが知っている知識
-{knowledge_content}
+{knowledge_content if knowledge_content.strip() else "まだ知識がありません。"}
 
 ## これまでの会話履歴
 以下に続くメッセージは、Playerとあなた(information_manager)のこれまでの会話履歴です。
@@ -90,8 +90,6 @@ class InformationManager:
             if args and "query" in args:
                 self.pending_search_query = args["query"]
             return self.execute_task_with_delay("資料調査", args)
-        elif tool_name == "other_task":
-            return self.execute_task_with_delay("その仕事", args)
         else:
             return "未対応のツールが呼ばれました。"
 
@@ -129,7 +127,7 @@ class InformationManager:
                     if 'filename' in self.pending_search_query:
                         filename = self.pending_search_query['filename']
                         self.pending_search_query['filename'] = f"information/{filename}"
-                    create_csv_file(**self.pending_search_query)
+                    create_csv_file(**self.pending_search_query, knowledge_path=str(self.knowledge_path), time_manager=self.time_manager)
                 return_message = f"{task_name}から戻りました！"
                 self.pending_search_query = None
             elif task_name == "CSV更新" and self.pending_search_query:
@@ -138,7 +136,7 @@ class InformationManager:
                     if 'update_spec' in self.pending_search_query and 'filename' in self.pending_search_query['update_spec']:
                         filename = self.pending_search_query['update_spec']['filename']
                         self.pending_search_query['update_spec']['filename'] = f"information/{filename}"
-                    update_csv_from_knowledge(**self.pending_search_query)
+                    update_csv_from_knowledge(**self.pending_search_query, knowledge_path=str(self.knowledge_path), time_manager=self.time_manager)
                 return_message = f"{task_name}から戻りました！"
                 self.pending_search_query = None
             else:
@@ -169,7 +167,8 @@ class InformationManager:
                         "filename": {"type": "string", "description": "保存ファイル名。日本語名可", "default": "data.csv"},
                         "columns": {"type": "array", "items": {"type": "string"}, "description": "ヘッダ行"},
                         "rows": {"type": "array", "items": {"type": "array", "items": {}}, "description": "初期データ行（任意）"},
-                        "description": {"type": "string", "description": "knowledge.txt 用の説明（任意）"}
+                        "description": {"type": "string", "description": "CSVファイルの用途説明（どのような時にこのファイルを使うかを説明）"},
+                        "column_descriptions": {"type": "object", "description": "各カラムの説明辞書 例: {'カラム名': '説明', ...}"}
                     },
                     "required": ["columns"]
                 }
@@ -257,19 +256,6 @@ class InformationManager:
             }
         })
 
-        # その他のタスク　/supply_manager/こんにちは 物資を運んで 春日小学校に水500mlを100本
-        defs.append({
-            "type": "function",
-            "function": {
-                "name": "other_task",
-                "description": "csv作成・更新、資料調査以外のやる事を実行するtool",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"task_description": {"type": "string", "description": "やる内容を簡潔に"}},
-                    "required": ["task_description"]
-                }
-            }
-        })
 
         return defs
 

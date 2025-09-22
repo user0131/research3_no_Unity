@@ -17,7 +17,7 @@ class SupplyManager:
 
     def __init__(self, client: OpenAI, time_manager):
         self.client = client
-        self.knowledge_path = Path("./src/knowledge_supply.txt")
+        self.knowledge_path = Path("./src/knowledge/knowledge_supply.txt")
         self.time_manager = time_manager
         self.in_conversation = False
         self.away_until_time = None
@@ -95,7 +95,7 @@ class SupplyManager:
 {inventory_summary}
 
 ## あなたが知っている知識
-{knowledge_content}
+{knowledge_content if knowledge_content.strip() else "まだ知識がありません。"}
 
 ## これまでの会話履歴
 以下に続くメッセージは、Playerとあなた(supply_manager)のこれまでの会話履歴です。

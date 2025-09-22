@@ -94,8 +94,15 @@ class CSVUpdatePlan(BaseModel): # csv更新時に、「何を」「どのよう�
 
 
 
-def _ensure_outdir() -> Path:
-    outdir = Path("csv")
+def _ensure_outdir(filename: str = "") -> Path:
+    # ファイル名にディレクトリが含まれている場合はそれを考慮
+    if "/" in filename:
+        # パスの親ディレクトリを取得
+        file_path = Path("csv") / filename
+        outdir = file_path.parent
+    else:
+        outdir = Path("csv")
+
     outdir.mkdir(parents=True, exist_ok=True)
     return outdir
 
@@ -131,6 +138,9 @@ def create_csv_file(
     columns: Optional[List[str]] = None,
     rows: Optional[List[List[Any]]] = None,
     description: Optional[str] = None,
+    column_descriptions: Optional[Dict[str, str]] = None,
+    knowledge_path: Optional[str] = None,
+    time_manager = None,
 ) -> str:
     """
     CSVファイルを作成
@@ -147,8 +157,8 @@ def create_csv_file(
 
     spec = CSVFormSpec.model_validate(form_spec).model_dump()
 
-    outdir = _ensure_outdir()
-    path = outdir / filename
+    outdir = _ensure_outdir(filename)
+    path = outdir / Path(filename).name
 
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -159,15 +169,36 @@ def create_csv_file(
             writer.writerow(row)
 
     # knowledge に登録
-    try:
-        knowledge_path = Path("./src/knowledge.txt")
-        current = knowledge_path.read_text(encoding="utf-8") if knowledge_path.exists() else ""
-        desc = spec.get("description") or "(説明なし)"
-        columns_str = ", ".join(spec["columns"])
-        new_entry = f"\n\n## 【既存CSV】{filename}\n説明: {desc}\n現状のカラム: {columns_str}"
-        knowledge_path.write_text(current + new_entry, encoding="utf-8")
-    except Exception:
-        pass
+    if knowledge_path:
+        try:
+            knowledge_file = Path(knowledge_path)
+            current = knowledge_file.read_text(encoding="utf-8") if knowledge_file.exists() else ""
+            desc = spec.get("description") or "(説明なし)"
+            columns_str = ", ".join(spec["columns"])
+
+            # カラム説明を追加
+            column_desc_lines = []
+            for col in spec["columns"]:
+                if column_descriptions:
+                    col_desc = column_descriptions.get(col, "")
+                else:
+                    col_desc = ""
+                column_desc_lines.append(f"- {col}: {col_desc}")
+            column_desc_text = f"\nカラム説明:\n" + "\n".join(column_desc_lines)
+
+            # CSV情報セクションがない場合は作成
+            if "# CSV情報" not in current:
+                current += "\n\n# CSV情報\n\n## 保有CSV"
+
+            # 新しく作成したCSVとしてタイムスタンプ付きで記録（訓練内時間）
+            if time_manager:
+                simulation_time = time_manager.get_current_time()
+                new_entry = f"\n\n### 【{filename}】 (作成時刻: {simulation_time})\n説明: {desc}\n現状のカラム: {columns_str}{column_desc_text}"
+            else:
+                new_entry = f"\n\n### 【{filename}】\n説明: {desc}\n現状のカラム: {columns_str}{column_desc_text}"
+            knowledge_file.write_text(current + new_entry, encoding="utf-8")
+        except Exception:
+            pass
 
     return str(path)
 
@@ -222,13 +253,83 @@ def _update_knowledge_columns(knowledge_path: Path, filename: str, new_columns: 
         return
 
     text = knowledge_path.read_text(encoding="utf-8")
-    pattern = rf"(## 【既存CSV】{re.escape(filename)}[\s\S]*?現状のカラム:)\s*([^\n]*)"
+    pattern = rf"(### 【{re.escape(filename)}】[\s\S]*?現状のカラム:)\s*([^\n]*)"
     columns_str = ", ".join(new_columns)
     updated_text = re.sub(pattern, rf"\1 {columns_str}", text)
     knowledge_path.write_text(updated_text, encoding="utf-8")
 
+def _add_update_record_to_knowledge(knowledge_path: Path, filename: str, plan: Dict[str, Any], time_manager = None, cell_changes = None):
+    """CSV更新記録をknowledgeに追加"""
+    if not knowledge_path.exists():
+        return
 
-def _apply_update_plan_csv_full(path: str, plan: Dict[str, Any]) -> str:
+    try:
+        # 訓練内時刻を取得
+        if time_manager:
+            current_time = time_manager.get_current_time()
+        else:
+            from datetime import datetime
+            current_time = datetime.now().strftime("%H:%M")
+
+        # 更新記録の作成
+        update_records = []
+
+        # カラム追加記録
+        if plan.get("add_columns"):
+            for col in plan["add_columns"]:
+                col_name = col.get("name")
+                update_records.append(f"- カラム追加: '{col_name}'")
+
+        # 行追加記録（具体的なデータ内容を記録）
+        if plan.get("append_rows"):
+            for row_block in plan["append_rows"]:
+                objects = row_block.get("objects", [])
+                for obj in objects:
+                    # オブジェクトの内容を文字列化
+                    data_summary = ", ".join([f"{k}: {v}" for k, v in obj.items() if v])
+                    update_records.append(f"- データ追加: {data_summary}")
+
+        # セル更新記録（変更前の値も記録）
+        if cell_changes:
+            for change in cell_changes:
+                column = change["column"]
+                new_value = change["new_value"]
+                old_value = change["old_value"]
+                identifier = change["identifier"]
+
+                if identifier:
+                    update_records.append(f"- ({identifier})の{column}の値を'{old_value}'から'{new_value}'に変更")
+                else:
+                    update_records.append(f"- {column}の値を'{old_value}'から'{new_value}'に変更")
+
+        if not update_records:
+            return
+
+        # 更新記録をknowledgeに追加
+        text = knowledge_path.read_text(encoding="utf-8")
+
+        # CSV更新記録セクションがない場合は作成
+        if "## CSV更新記録" not in text:
+            if "# CSV情報" in text:
+                # CSV情報セクションの後に更新記録セクションを追加
+                text = text.replace("# CSV情報", "# CSV情報\n\n## 保有CSV\n\n## CSV更新記録")
+            else:
+                # CSV情報セクション自体がない場合
+                text += "\n\n# CSV情報\n\n## 保有CSV\n\n## CSV更新記録"
+
+        # 更新記録を追加
+        update_record_text = f"\n### {current_time} - {filename}\n" + "\n".join(update_records)
+
+        # CSV更新記録セクションの後に追加
+        pattern = r"(## CSV更新記録)"
+        updated_text = re.sub(pattern, rf"\1{update_record_text}\n", text)
+        knowledge_path.write_text(updated_text, encoding="utf-8")
+
+    except Exception as e:
+        print(f"更新記録追加エラー: {e}")
+
+
+def _apply_update_plan_csv_full(path: str, plan: Dict[str, Any], knowledge_file: Path, time_manager = None) -> str:
     # 空ファイルは作らない前提（knowledge登録CSVを更新）。無ければエラー
     p = Path(path)
     if not p.exists() or p.stat().st_size == 0:
@@ -237,6 +338,57 @@ def _apply_update_plan_csv_full(path: str, plan: Dict[str, Any]) -> str:
     header, rows = _read_csv_all(path)
     if not header:
         raise ValueError("CSVのヘッダ行が見つかりません。")
+
+    # セル更新の変更前値を事前に記録
+    cell_changes = []
+    for sc in plan.get("update_cells", []) or []:
+        idx = sc.get("row_index")
+        col = sc.get("column")
+        val = sc.get("value")
+        if idx is not None and col is not None and 0 <= idx < len(rows):
+            old_value = rows[idx].get(col, "") if col in rows[idx] else ""
+
+            # 冒頭のフィールドから最小限で識別できるフィールドを取得
+            row_data = rows[idx]
+            identifier_fields = []
+
+            # 冒頭のフィールドから順番に確認
+            for field_idx, key in enumerate(header):
+                if key == col:  # 更新対象のカラムはスキップ
+                    continue
+                value = row_data.get(key, "")
+                if value:  # 値があるフィールドのみ
+                    identifier_fields.append(f"{key}: {value}")
+
+                    # 現在までのフィールドで他の行と区別できるかチェック
+                    current_identifier = ", ".join(identifier_fields)
+                    is_unique = True
+                    for other_idx, other_row in enumerate(rows):
+                        if other_idx == idx:
+                            continue
+                        # 他の行との比較
+                        other_fields = []
+                        for check_key in header[:field_idx+1]:
+                            if check_key == col:
+                                continue
+                            other_value = other_row.get(check_key, "")
+                            if other_value:
+                                other_fields.append(f"{check_key}: {other_value}")
+                        other_identifier = ", ".join(other_fields)
+                        if current_identifier == other_identifier:
+                            is_unique = False
+                            break
+
+                    if is_unique:
+                        break
+
+            cell_changes.append({
+                "row_index": idx,
+                "column": col,
+                "new_value": val,
+                "old_value": old_value,
+                "identifier": ", ".join(identifier_fields) if identifier_fields else f"行{idx+1}"
+            })
 
     # 1) 列追加
     for col in plan.get("add_columns", []) or []:
@@ -289,8 +441,10 @@ def _apply_update_plan_csv_full(path: str, plan: Dict[str, Any]) -> str:
 
     # knowledgeのカラム情報を更新
     filename = Path(path).name
-    knowledge_path = Path("./src/knowledge.txt")
-    _update_knowledge_columns(knowledge_path, filename, header)
+    _update_knowledge_columns(knowledge_file, filename, header)
+
+    # CSV更新記録をknowledgeに追加
+    _add_update_record_to_knowledge(knowledge_file, filename, plan, time_manager, cell_changes)
 
     return out_path
 
@@ -298,12 +452,16 @@ def _apply_update_plan_csv_full(path: str, plan: Dict[str, Any]) -> str:
 def update_csv_from_knowledge(
     *,
     instruction: Optional[str] = None,
-    update_spec: Optional[Any] = None
+    update_spec: Optional[Any] = None,
+    knowledge_path: Optional[str] = None,
+    time_manager = None
 ) -> str:
     """CSV更新: 自然文指示またはupdate_specでCSVを更新"""
     # CSV一覧取得
-    knowledge_path = Path("./src/knowledge.txt")
-    items = _read_knowledge_csvs(knowledge_path)
+    if not knowledge_path:
+        return "knowledge_pathが必要です"
+    knowledge_file = Path(knowledge_path)
+    items = _read_knowledge_csvs(knowledge_file)
     if not items:
         raise RuntimeError("CSV記録がありません")
 
@@ -316,10 +474,15 @@ def update_csv_from_knowledge(
         plan = _generate_plan_with_llm(items, instruction)
 
     # 対象ファイル決定
-    target_path = f"csv/{plan.filename or items[0]['title']}"
+    filename = plan.filename or items[0]['title']
+    # ディレクトリ情報を考慮してパスを構築
+    if "/" in filename:
+        target_path = f"csv/{filename}"
+    else:
+        target_path = f"csv/{filename}"
 
     # 実行
-    save_path = _apply_update_plan_csv_full(target_path, plan.model_dump())
+    save_path = _apply_update_plan_csv_full(target_path, plan.model_dump(), knowledge_file, time_manager)
 
     return save_path
 

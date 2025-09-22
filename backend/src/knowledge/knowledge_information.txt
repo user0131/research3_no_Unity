@@ -1,0 +1,17 @@
+
+
+# CSV情報
+
+## 保有CSV
+
+### 【information/disaster_info.csv】 (作成時刻: 10:38)
+説明: 災害情報の取りまとめ（停電・断水・物資要請）。報告用に使用。
+現状のカラム: source, info_type, location, details, quantity, time, status
+カラム説明:
+- source:
+- info_type:
+- location:
+- details:
+- quantity:
+- time:
+- status:
