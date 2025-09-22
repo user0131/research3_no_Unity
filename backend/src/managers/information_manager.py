@@ -257,7 +257,7 @@ class InformationManager:
             }
         })
 
-        # その他のタスク
+        # その他のタスク　/supply_manager/こんにちは 物資を運んで 春日小学校に水500mlを100本
         defs.append({
             "type": "function",
             "function": {
