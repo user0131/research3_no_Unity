@@ -9,13 +9,9 @@ class SupplyWorker(BaseWorker):
     """物資管理専門ワーカー（全機能対応）"""
 
     def __init__(self, worker_name: str, manager, time_manager):
-        # 物資管理の全機能を実行可能
+        # 物資管理の配送と調達機能を実行可能
         available_functions = [
-            "check_inventory",
-            "update_inventory",
-            "show_inventory",
             "deliver_supplies",
-            "show_delivery_log",
             "procure_supplies"
         ]
 
@@ -41,19 +37,9 @@ class SupplyWorker(BaseWorker):
 
         function_name = self.task_data.get("function")
 
-        # 在庫関連
-        if function_name == "check_inventory":
-            return self._check_inventory()
-        elif function_name == "update_inventory":
-            return self._update_inventory()
-        elif function_name == "show_inventory":
-            return self._show_inventory()
-
         # 配送関連
-        elif function_name == "deliver_supplies":
+        if function_name == "deliver_supplies":
             return self._deliver_supplies()
-        elif function_name == "show_delivery_log":
-            return self._show_delivery_log()
 
         # 調達関連
         elif function_name == "procure_supplies":
@@ -62,36 +48,16 @@ class SupplyWorker(BaseWorker):
         else:
             return {"success": False, "message": f"未対応の機能: {function_name}"}
 
-    # 在庫管理機能
-    def _check_inventory(self) -> Dict[str, Any]:
-        """在庫確認"""
-        item_name = self.task_data.get("item_name", "")
-
-        try:
-            with open(self.inventory_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    if item_name in row['物資名']:
-                        stock = int(row['在庫数'])
-                        unit = row['単位']
-                        return {
-                            "success": True,
-                            "item_name": row['物資名'],
-                            "stock": stock,
-                            "unit": unit,
-                            "available": stock > 0
-                        }
-
-            return {"success": False, "message": f"{item_name}が見つかりません"}
-        except Exception as e:
-            return {"success": False, "message": f"在庫確認エラー: {e}"}
-
-    def _update_inventory(self) -> Dict[str, Any]:
-        """在庫更新"""
+    # 配送機能
+    def _deliver_supplies(self) -> Dict[str, Any]:
+        """物資配送記録と在庫更新"""
+        shelter_name = self.task_data.get("shelter_name", "")
         item_name = self.task_data.get("item_name", "")
         quantity = self.task_data.get("quantity", 0)
+        unit = self.task_data.get("unit", "")
 
         try:
+            # 在庫を減らす
             rows = []
             updated = False
 
@@ -105,6 +71,8 @@ class SupplyWorker(BaseWorker):
                         new_stock = max(0, current_stock - quantity)
                         row['在庫数'] = str(new_stock)
                         updated = True
+                        if not unit:
+                            unit = row['単位']
                     rows.append(row)
 
             if updated:
@@ -113,49 +81,7 @@ class SupplyWorker(BaseWorker):
                     writer.writeheader()
                     writer.writerows(rows)
 
-                return {
-                    "success": True,
-                    "message": f"{item_name}の在庫を{quantity}減らしました",
-                    "item_name": item_name,
-                    "quantity_updated": quantity
-                }
-            else:
-                return {"success": False, "message": f"{item_name}が見つかりません"}
-        except Exception as e:
-            return {"success": False, "message": f"在庫更新エラー: {e}"}
-
-    def _show_inventory(self) -> Dict[str, Any]:
-        """在庫一覧表示"""
-        try:
-            inventory_list = []
-            with open(self.inventory_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    if int(row['在庫数']) > 0:
-                        inventory_list.append({
-                            "物資名": row['物資名'],
-                            "在庫数": row['在庫数'],
-                            "単位": row['単位'],
-                            "保管場所": row['保管場所']
-                        })
-
-            return {
-                "success": True,
-                "inventory_list": inventory_list,
-                "total_items": len(inventory_list)
-            }
-        except Exception as e:
-            return {"success": False, "message": f"在庫一覧取得エラー: {e}"}
-
-    # 配送機能
-    def _deliver_supplies(self) -> Dict[str, Any]:
-        """物資配送記録"""
-        shelter_name = self.task_data.get("shelter_name", "")
-        item_name = self.task_data.get("item_name", "")
-        quantity = self.task_data.get("quantity", 0)
-        unit = self.task_data.get("unit", "")
-
-        try:
+            # 配送記録を追加
             current_time = self.time_manager.get_current_time()
             with open(self.delivery_log_path, 'a', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
@@ -171,7 +97,7 @@ class SupplyWorker(BaseWorker):
 
             return {
                 "success": True,
-                "message": f"{shelter_name}への{item_name} {quantity}{unit}の配送を記録しました",
+                "message": f"{shelter_name}への{item_name} {quantity}{unit}の配送を完了し、在庫を更新しました",
                 "delivery_details": {
                     "time": current_time,
                     "shelter": shelter_name,
@@ -183,40 +109,52 @@ class SupplyWorker(BaseWorker):
         except Exception as e:
             return {"success": False, "message": f"配送記録エラー: {e}"}
 
-    def _show_delivery_log(self) -> Dict[str, Any]:
-        """配送記録表示"""
-        try:
-            delivery_log = []
-            with open(self.delivery_log_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    delivery_log.append(dict(row))
-
-            return {
-                "success": True,
-                "delivery_log": delivery_log[-10:],  # 最新10件
-                "total_deliveries": len(delivery_log)
-            }
-        except Exception as e:
-            return {"success": False, "message": f"配送記録取得エラー: {e}"}
-
     # 調達機能
     def _procure_supplies(self) -> Dict[str, Any]:
-        """物資調達"""
+        """物資調達と在庫追加"""
         item_name = self.task_data.get("item_name", "")
         quantity = self.task_data.get("quantity", 0)
 
-        # 実際の調達処理は簡略化（外部業者への発注など）
-        return {
-            "success": True,
-            "message": f"{item_name} {quantity}個の調達手配を完了しました",
-            "procurement_details": {
-                "item": item_name,
-                "quantity": quantity,
-                "estimated_arrival": "6時間後",
-                "supplier": "災害対応協定業者"
-            }
-        }
+        try:
+            # 在庫を増やす
+            rows = []
+            updated = False
+            unit = ""
+
+            with open(self.inventory_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames
+
+                for row in reader:
+                    if item_name in row['物資名']:
+                        current_stock = int(row['在庫数'])
+                        new_stock = current_stock + quantity
+                        row['在庫数'] = str(new_stock)
+                        unit = row['単位']
+                        updated = True
+                    rows.append(row)
+
+            if updated:
+                with open(self.inventory_path, 'w', encoding='utf-8', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(rows)
+
+                return {
+                    "success": True,
+                    "message": f"{item_name} {quantity}{unit}の調達が完了し、在庫に追加しました",
+                    "procurement_details": {
+                        "item": item_name,
+                        "quantity": quantity,
+                        "unit": unit,
+                        "supplier": "災害対応協定業者"
+                    }
+                }
+            else:
+                return {"success": False, "message": f"{item_name}が在庫リストに見つかりません"}
+
+        except Exception as e:
+            return {"success": False, "message": f"調達処理エラー: {e}"}
 
     def complete_task(self) -> Dict[str, Any]:
         """タスクを完了し、結果を返す（BaseWorkerをオーバーライド）"""
