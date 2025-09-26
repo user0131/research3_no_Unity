@@ -106,7 +106,7 @@ function App() {
               className={`view-button ${viewMode === 'person' ? 'active' : ''}`}
               onClick={() => setViewMode('person')}
             >
-              👤 人物別
+              👤 人物別ログ
             </button>
           </div>
           <button className="settings-button" onClick={() => setIsSettingsOpen(true)}>
