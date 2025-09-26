@@ -64,7 +64,6 @@ class SupplyManager:
     def build_system_prompt(self) -> str:
         """システムプロンプトを構築"""
         knowledge_content = self.get_knowledge()
-        inventory_summary = self.get_inventory_summary()
         workers_status = self._get_workers_status()
 
         return f"""
@@ -75,6 +74,7 @@ class SupplyManager:
 - **会話スタイル**: 同僚との自獨な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。
 - **情報の扱い**: あなたの知っている情報は会話履歴と「あなたが知っている知識」、そして在庫情報のみです。手持ちにない情報の推測や憶測は避けてください
 - **作業依頼**: 明確に何かの作業を頼まれた場合のみ、今やっていいか確認し、Playerから肯定的な内容をもらってから実行してください。それ以外は通常の会話をしてください。
+- **ワーカー情報の非開示**: ワーカーA、ワーカーB、ワーカーCといった具体的なワーカー名や、誰が作業をするかの詳細をPlayerに伝える必要はありません。あなたが内部的に判断して「手配します」「対応します」のように伝えてください。
 
 ## 物資管理の役割：
 - 避難所からの物資要請を受けて、在庫を確認し配送を手配します
@@ -89,11 +89,14 @@ class SupplyManager:
 ## 重要
 - 極力あなた(supply_manager)自身が作業を行うことは避けてください。workerの手が空いていない場合は、Playerにそのことを伝え、それでもやってほしいと頼まれた場合にあなた自身が作業をしてください。
 
-## 現在のワーカー状況
+## Playerに無理に開示しなくて大丈夫な情報：
+以下の情報は、あなたが内部的に判断するために使用します。Playerに対しては詳細を説明する必要はありません。
+**重要**: ワーカーの名前（ワーカーA、ワーカーB、ワーカーC）や、誰が何をするかといった内部情報をPlayerに伝えないでください。
+
+### 現在のワーカー状況（この情報はPlayerに伝えない）
 {workers_status}
 
-## 現在の在庫状況
-{inventory_summary}
+Playerに対しては「手配します」「対応します」「〇〇頃に完了予定です」のように、ワーカー名を出さずに伝えてください。
 
 ## あなたが知っている知識
 {knowledge_content if knowledge_content.strip() else "まだ知識がありません。"}
@@ -123,7 +126,7 @@ class SupplyManager:
                         summary.append(f"- {row['物資名']}: {row['在庫数']}{row['単位']}")
 
             if summary:
-                return "主な在庫:\n" + "\n".join(summary[:10])  # 最初の10件のみ表示
+                return "主な在庫:\n" + "\n".join(summary)
             else:
                 return "在庫がありません"
         except Exception as e:
@@ -302,7 +305,38 @@ class SupplyManager:
 
         # 3. ワーカーにタスクを依頼
         args["function"] = function_name
-        return worker.start_task(f"{function_name}の実行", args)
+        worker_response = worker.start_task(f"{function_name}の実行", args)
+
+        # LLMを使ってPlayerに伝える自然な表現に変換
+        return self._convert_to_natural_response(function_name, args, worker_response)
+
+    def _convert_to_natural_response(self, function_name: str, args: Dict, worker_response: str) -> str:
+        """ワーカーの応答をPlayerに伝える自然な表現に変換"""
+        try:
+            client = self.client
+
+            conversion_prompt = f"""
+あなたはsupply_managerです。部下に作業を依頼したところ、以下の応答がありました。
+
+タスク: {function_name}
+引数: {args}
+ワーカーの応答: {worker_response}
+
+この応答をPlayerに伝える際、技術的な用語（deliver_supplies、procure_suppliesなど）を使わず、自然な日本語に変換してください。
+例：「deliver_suppliesの実行を開始しました」→「配送を手配しました」
+
+短く簡潔に、話し言葉で返してください。
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": conversion_prompt}]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception:
+            return worker_response
 
     def _generate_task_instruction(self, worker_name: str, function_name: str, args: Dict) -> str:
         """マネージャーからワーカーへのタスク指示を生成"""

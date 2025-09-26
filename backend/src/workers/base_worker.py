@@ -26,7 +26,7 @@ class BaseWorker(ABC):
         """タスクを開始"""
         if self.is_busy:
             current_task_name = self.current_task or "作業"
-            return f"{self.worker_name}は現在{current_task_name}中です。"
+            return f"手が空いていません（現在{current_task_name}中）。"
 
         self.is_busy = True
         self.current_task = task_description
@@ -35,7 +35,7 @@ class BaseWorker(ABC):
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
         self.task_end_time = current_time + timedelta(minutes=2)
 
-        return f"{self.worker_name}が{task_description}を開始しました。{self.task_end_time.strftime('%H:%M')}頃に完了予定です。"
+        return f"{task_description}を開始しました。{self.task_end_time.strftime('%H:%M')}頃に完了予定です。"
 
     def check_task_completion(self) -> bool:
         """タスクが完了したかチェック"""
