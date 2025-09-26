@@ -17,6 +17,7 @@ interface PersonChatProps {
 const PersonChat: React.FC<PersonChatProps> = ({ person }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [expandedMessages, setExpandedMessages] = useState<Record<number, boolean>>({});
 
   useEffect(() => {
     fetchPersonHistory();
@@ -60,6 +61,13 @@ const PersonChat: React.FC<PersonChatProps> = ({ person }) => {
     }
   };
 
+  const toggleMessage = (index: number) => {
+    setExpandedMessages(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
+  };
+
   return (
     <div className="person-chat">
       <div className="person-chat-header">
@@ -75,12 +83,21 @@ const PersonChat: React.FC<PersonChatProps> = ({ person }) => {
         ) : (
           messages.map((msg, index) => {
             const direction = getMessageDirection(msg);
+            const isExpanded = expandedMessages[index];
+            const isSent = direction === 'sent';
+
             return (
               <div key={index} className={`message-item ${direction}`}>
-                <div className="message-header">
+                <div
+                  className="message-header"
+                  onClick={() => isSent && toggleMessage(index)}
+                  style={{ cursor: isSent ? 'pointer' : 'default' }}
+                >
                   <span className="message-direction">
                     {direction === 'sent' ? (
-                      `→ ${getPersonDisplayName(msg.to)}`
+                      <>
+                        {isExpanded ? '▼' : '▶'} → {getPersonDisplayName(msg.to)}
+                      </>
                     ) : direction === 'received' ? (
                       `← ${getPersonDisplayName(msg.from)}`
                     ) : (
@@ -96,9 +113,11 @@ const PersonChat: React.FC<PersonChatProps> = ({ person }) => {
                     </span>
                   </div>
                 </div>
-                <div className="message-content">
-                  {msg.content}
-                </div>
+                {(!isSent || isExpanded) && (
+                  <div className="message-content">
+                    {msg.content}
+                  </div>
+                )}
               </div>
             );
           })
