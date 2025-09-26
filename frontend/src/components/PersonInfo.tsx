@@ -23,9 +23,9 @@ const PersonInfo: React.FC<PersonInfoProps> = ({ person }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [expandedCsvs, setExpandedCsvs] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
+  useEffect(() => { // 1秒ごとに更新
     fetchPersonInfo();
-    const interval = setInterval(fetchPersonInfo, 5000);
+    const interval = setInterval(fetchPersonInfo, 1000);
     return () => clearInterval(interval);
   }, [person]);
 

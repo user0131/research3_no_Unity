@@ -25,10 +25,10 @@ const ManagerInfo: React.FC<ManagerInfoProps> = ({ managerType }) => {
   useEffect(() => {
     loadManagerData();
     loadConversationHistory();
-    const interval = setInterval(() => {
+    const interval = setInterval(() => { // 1秒ごとに更新
       loadManagerData();
       loadConversationHistory();
-    }, 5000);
+    }, 1000);
     return () => clearInterval(interval);
   }, [managerType]);
 

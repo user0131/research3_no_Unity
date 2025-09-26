@@ -17,11 +17,10 @@ interface PersonChatProps {
 const PersonChat: React.FC<PersonChatProps> = ({ person }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [expandedMessages, setExpandedMessages] = useState<Record<number, boolean>>({});
 
-  useEffect(() => {
+  useEffect(() => { // 1秒ごとに更新
     fetchPersonHistory();
-    const interval = setInterval(fetchPersonHistory, 5000);
+    const interval = setInterval(fetchPersonHistory, 1000);
     return () => clearInterval(interval);
   }, [person]);
 
@@ -61,13 +60,6 @@ const PersonChat: React.FC<PersonChatProps> = ({ person }) => {
     }
   };
 
-  const toggleMessage = (index: number) => {
-    setExpandedMessages(prev => ({
-      ...prev,
-      [index]: !prev[index]
-    }));
-  };
-
   return (
     <div className="person-chat">
       <div className="person-chat-header">
@@ -83,21 +75,13 @@ const PersonChat: React.FC<PersonChatProps> = ({ person }) => {
         ) : (
           messages.map((msg, index) => {
             const direction = getMessageDirection(msg);
-            const isExpanded = expandedMessages[index];
-            const isSent = direction === 'sent';
 
             return (
               <div key={index} className={`message-item ${direction}`}>
-                <div
-                  className="message-header"
-                  onClick={() => isSent && toggleMessage(index)}
-                  style={{ cursor: isSent ? 'pointer' : 'default' }}
-                >
+                <div className="message-header">
                   <span className="message-direction">
                     {direction === 'sent' ? (
-                      <>
-                        {isExpanded ? '▼' : '▶'} → {getPersonDisplayName(msg.to)}
-                      </>
+                      `→ ${getPersonDisplayName(msg.to)}`
                     ) : direction === 'received' ? (
                       `← ${getPersonDisplayName(msg.from)}`
                     ) : (
@@ -113,11 +97,9 @@ const PersonChat: React.FC<PersonChatProps> = ({ person }) => {
                     </span>
                   </div>
                 </div>
-                {(!isSent || isExpanded) && (
-                  <div className="message-content">
-                    {msg.content}
-                  </div>
-                )}
+                <div className="message-content">
+                  {msg.content}
+                </div>
               </div>
             );
           })

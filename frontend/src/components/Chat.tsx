@@ -12,6 +12,7 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,12 +29,22 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
       }
     }, 10000);
 
-    return () => clearInterval(timeInterval);
+    // 会話履歴を定期的に更新（1秒ごと）
+    const historyInterval = setInterval(() => {
+      loadHistory();
+    }, 1000);
+
+    return () => {
+      clearInterval(timeInterval);
+      clearInterval(historyInterval);
+    };
   }, [selectedManager]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (shouldAutoScroll) {
+      scrollToBottom();
+    }
+  }, [messages, shouldAutoScroll]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -61,7 +72,9 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
     if (!inputMessage.trim() || isLoading) return;
 
     const messageToSend = `/${selectedManager}_manager/${inputMessage}`;
+    setInputMessage('');
     setIsLoading(true);
+    setShouldAutoScroll(true);
 
     try {
       const response = await api.sendMessage(messageToSend);
@@ -71,7 +84,6 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
       console.error('メッセージ送信エラー:', error);
     } finally {
       setIsLoading(false);
-      setInputMessage('');
     }
   };
 
@@ -130,7 +142,14 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
         <span className="current-time">現在時刻: {currentTime}</span>
       </div>
 
-      <div className="messages-container">
+      <div
+        className="messages-container"
+        onScroll={(e) => {
+          const target = e.currentTarget;
+          const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 100;
+          setShouldAutoScroll(isAtBottom);
+        }}
+      >
         {messages.map((message, index) => {
           const direction = getMessageDirection(message);
           return (
