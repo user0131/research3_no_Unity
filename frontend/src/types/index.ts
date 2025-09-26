@@ -2,6 +2,9 @@ export interface Message {
   role: string;
   name?: string;
   content: string;
+  from?: string;
+  to?: string;
+  timestamp?: string;
 }
 
 export interface ManagerStatus {

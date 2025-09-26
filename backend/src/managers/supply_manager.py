@@ -293,12 +293,12 @@ class SupplyManager:
         # 1. マネージャーからワーカーへの指示を会話履歴に追加
         task_instruction = self._generate_task_instruction(worker_name, function_name, args)
         if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
-            self.manager.add_message("user", "supply_manager", task_instruction, "supply")
+            self.manager.add_message("user", "supply_manager", task_instruction, "supply", from_person="supply_manager", to_person=worker_name)
 
         # 2. ワーカーからマネージャーへの承諾を会話履歴に追加
         task_acceptance = self._generate_task_acceptance(worker_name, function_name, args)
         if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
-            self.manager.add_message("user", worker_name, task_acceptance, "supply")
+            self.manager.add_message("user", worker_name, task_acceptance, "supply", from_person=worker_name, to_person="supply_manager")
 
         # 3. ワーカーにタスクを依頼
         args["function"] = function_name
@@ -515,25 +515,32 @@ class SupplyManager:
                 worker_report = worker_result["report"]
 
                 # マネージャーがWorkerの報告を見て、Playerに報告すべきか判断
-                manager_response = self._process_worker_report(worker_name, worker_report)
+                manager_response, response_to = self._process_worker_report(worker_name, worker_report)
 
                 # 注意: manager_responseは戻り値として返され、chat.pyで履歴に追加される
 
                 all_completed_tasks.append({
                     "worker_name": worker_name,
                     "report": worker_report,
-                    "manager_response": manager_response
+                    "manager_response": manager_response,
+                    "response_to": response_to  # 宛先情報を追加
                 })
 
         # マネージャー自身のタスク完了報告
         if manager_return_message and all_completed_tasks:
             # マネージャー自身とワーカーの両方が完了した場合、まとめて報告
-            return f"{manager_return_message}\n\n{all_completed_tasks[0]['manager_response']}"
+            return {
+                "message": f"{manager_return_message}\n\n{all_completed_tasks[0]['manager_response']}",
+                "to": all_completed_tasks[0]['response_to']
+            }
         elif manager_return_message:
-            return manager_return_message
+            return {"message": manager_return_message, "to": "Player"}
         elif all_completed_tasks:
             # ワーカーのタスクのみ完了した場合、最後のマネージャー応答を返す
-            return all_completed_tasks[-1]['manager_response']
+            return {
+                "message": all_completed_tasks[-1]['manager_response'],
+                "to": all_completed_tasks[-1]['response_to']
+            }
 
         return None
 
@@ -551,8 +558,12 @@ class SupplyManager:
 
         return completed_results
 
-    def _process_worker_report(self, worker_name: str, worker_report: str) -> str:
-        """Workerの完了報告を処理し、Playerへの報告または次のアクションを決定"""
+    def _process_worker_report(self, worker_name: str, worker_report: str) -> tuple[str, str]:
+        """Workerの完了報告を処理し、Playerへの報告または次のアクションを決定
+
+        Returns:
+            tuple[str, str]: (応答メッセージ, 宛先)
+        """
         try:
             client = self.client
 
@@ -575,15 +586,12 @@ class SupplyManager:
 この報告を受けて、あなたは以下のいずれかの対応を取ります：
 
 1. **Playerに報告する**: タスクが成功した場合、またはPlayerの判断が必要な場合
-   → 「〜の作業が完了しました」のように、Playerに状況を報告してください
+   → 最初の行に「[TO:Player]」と書き、次の行から「〜の作業が完了しました」のように状況を報告してください
 
 2. **Workerに追加指示を出す**: 報告内容から追加作業が必要と判断した場合
-   → 「〜については、次に△△をお願いします」のように、次のアクションを指示してください
+   → 最初の行に「[TO:{worker_name}]」と書き、次の行から「〜については、次に△△をお願いします」のように指示してください
 
-3. **自分で対応を考える**: 問題があり、自分で調査や判断が必要な場合
-   → 「〜の件、確認して対応します」のように、自分の対応を表明してください
-
-上記を踏まえて、自然な話し言葉で応答してください。
+重要: 必ず最初の行に宛先を「[TO:宛先名]」の形式で明記してください。
 """
 
             response = client.chat.completions.create(
@@ -591,10 +599,22 @@ class SupplyManager:
                 messages=[{"role": "user", "content": process_prompt}]
             )
 
-            return response.choices[0].message.content
+            response_text = response.choices[0].message.content
+
+            # 宛先を解析
+            lines = response_text.strip().split('\n')
+            if lines and lines[0].startswith('[TO:'):
+                to_person = lines[0].replace('[TO:', '').replace(']', '').strip()
+                message = '\n'.join(lines[1:]).strip()
+            else:
+                # デフォルトはPlayer
+                to_person = "Player"
+                message = response_text
+
+            return message, to_person
 
         except Exception:
-            return f"{worker_name}からの報告を確認しました。Playerに状況を報告します。"
+            return f"{worker_name}からの報告を確認しました。Playerに状況を報告します。", "Player"
 
     def _generate_thank_you_message(self, worker_name: str, task_description: str) -> str:
         """ワーカーの完了報告に対するマネージャーの感謝メッセージを生成"""

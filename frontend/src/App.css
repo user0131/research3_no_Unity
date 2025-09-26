@@ -38,6 +38,36 @@ body {
 .header-right {
   display: flex;
   align-items: center;
+  gap: 12px;
+}
+
+.view-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.view-button {
+  padding: 8px 16px;
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background-color 0.3s;
+}
+
+.view-button:hover {
+  background-color: #1976d2;
+}
+
+.view-button.active {
+  background-color: #1976d2;
+}
+
+.view-button.active:hover {
+  background-color: #1565c0;
 }
 
 .app-header h1 {
@@ -73,6 +103,35 @@ body {
   border-color: #2196f3;
 }
 
+.person-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.person-tab {
+  padding: 6px 14px;
+  background-color: transparent;
+  color: #bdbdbd;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.3s ease;
+}
+
+.person-tab:hover {
+  background-color: #2a2a2a;
+  color: #e0e0e0;
+}
+
+.person-tab.active {
+  background-color: #1976d2;
+  color: #ffffff;
+  border-color: #1976d2;
+}
+
 .settings-button {
   padding: 8px 16px;
   background-color: #2196f3;
@@ -98,6 +157,13 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+
+.person-view {
+  flex: 1;
+  overflow: hidden;
+  background-color: #f8f9fa;
 }
 
 .sidebar {

@@ -119,12 +119,33 @@ def get_history():
     try:
         chat = get_chat_instance()
         manager_type = request.args.get('manager_type', 'all')
+        person = request.args.get('person', None)  # 特定の人物の会話履歴
 
+        # 特定の人物の会話履歴を取得
+        if person:
+            person_history = chat.get_person_history(person)
+            return jsonify({
+                "history": person_history,
+                "manager_type": manager_type,
+                "person": person
+            })
+
+        # マネージャータイプ別の履歴を取得
         history = chat.get_conversation_history(manager_type)
         return jsonify({
             "history": history,
             "manager_type": manager_type
         })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/chat/person-histories', methods=['GET'])
+def get_all_person_histories():
+    """全ての人物の会話履歴を取得"""
+    try:
+        chat = get_chat_instance()
+        all_histories = chat.get_all_person_histories()
+        return jsonify(all_histories)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

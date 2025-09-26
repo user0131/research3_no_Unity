@@ -191,7 +191,7 @@ class SupplyWorker(BaseWorker):
 
         # マネージャーの会話履歴に追加（ChatWithMemory経由）
         if hasattr(self.manager, 'manager') and hasattr(self.manager.manager, 'add_message'):
-            self.manager.manager.add_message("user", self.worker_name, worker_report, "supply")
+            self.manager.manager.add_message("user", self.worker_name, worker_report, "supply", from_person=self.worker_name, to_person="supply_manager")
 
         # タスク状態をリセット
         self.is_busy = False

@@ -100,6 +100,9 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
           >
             <div className="message-header">
               <span className="message-role">{message.name || message.role}</span>
+              {message.timestamp && (
+                <span className="message-timestamp">{message.timestamp}</span>
+              )}
             </div>
             <div className="message-content">{message.content}</div>
           </div>

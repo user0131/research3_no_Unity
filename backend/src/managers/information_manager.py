@@ -253,7 +253,12 @@ class InformationManager:
 
     def process_response(self, messages: List[Dict[str, str]]) -> tuple[str, Optional[str]]:
         """OpenAI APIレスポンスを処理してメッセージとロール名を返す"""
-self.manager.manager.add_message
+        response = self.client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=messages,
+            tools=self.get_function_definitions(),
+            tool_choice="auto"
+        )
 
         response_message = response.choices[0].message
 

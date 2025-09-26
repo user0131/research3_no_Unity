@@ -1,0 +1,160 @@
+.person-chat {
+  padding: 20px;
+  height: 100%;
+  background: white;
+  display: flex;
+  flex-direction: column;
+}
+
+.person-chat-header {
+  margin-bottom: 20px;
+  border-bottom: 2px solid #e0e0e0;
+  padding-bottom: 15px;
+}
+
+.person-chat-header h3 {
+  margin: 0 0 5px 0;
+  font-size: 20px;
+  color: #333;
+}
+
+.person-chat-header p {
+  margin: 0;
+  font-size: 14px;
+  color: #666;
+}
+
+.person-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.message-item {
+  border-radius: 12px;
+  padding: 12px 16px;
+  max-width: 85%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.message-item.sent {
+  align-self: flex-end;
+  background: #2196f3;
+  color: white;
+}
+
+.message-item.received {
+  align-self: flex-start;
+  background: #f5f5f5;
+  color: #333;
+  border: 1px solid #e0e0e0;
+}
+
+.message-item.system {
+  align-self: center;
+  background: #fff3e0;
+  color: #e65100;
+  border: 1px solid #ffb74d;
+  max-width: 95%;
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.message-item.sent .message-header {
+  color: #e3f2fd;
+}
+
+.message-item.received .message-header {
+  color: #666;
+}
+
+.message-item.system .message-header {
+  color: #bf360c;
+}
+
+.message-direction {
+  font-weight: 500;
+}
+
+.message-time {
+  font-size: 11px;
+  font-weight: normal;
+  opacity: 0.7;
+}
+
+.message-role {
+  font-size: 14px;
+}
+
+.message-content {
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.loading,
+.no-messages {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+  font-size: 16px;
+}
+
+.loading {
+  font-style: italic;
+}
+
+/* スクロールバーのスタイリング */
+.person-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.person-messages::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.person-messages::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.person-messages::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 768px) {
+  .person-chat {
+    padding: 15px;
+  }
+
+  .message-item {
+    max-width: 95%;
+    padding: 10px 14px;
+  }
+
+  .message-content {
+    font-size: 13px;
+  }
+
+  .person-chat-header h3 {
+    font-size: 18px;
+  }
+}

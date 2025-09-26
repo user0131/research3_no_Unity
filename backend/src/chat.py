@@ -33,9 +33,19 @@ class ChatWithMemory:
         self.info_manager.manager = self
         self.supply_manager.manager = self
 
-        # 会話履歴を分離
+        # 会話履歴を分離（マネージャータイプ別）
         self.info_conversation_history: List[Dict[str, str]] = []
         self.supply_conversation_history: List[Dict[str, str]] = []
+
+        # 各人物ごとの会話履歴ボックス
+        self.person_histories = {
+            "Player": [],
+            "information_manager": [],
+            "supply_manager": [],
+            "ワーカーA": [],
+            "ワーカーB": [],
+            "ワーカーC": []
+        }
 
 
 
@@ -61,8 +71,32 @@ class ChatWithMemory:
         return messages
 
 
-    def add_message(self, role: str, name: str, content: str, manager_type: str = "information"):
-        message = {"role": role, "name": name, "content": content}
+    def add_message(self, role: str, name: str, content: str, manager_type: str = "information", from_person: str = None, to_person: str = None):
+        # from_personとto_personが指定されていない場合はnameから推測
+        if from_person is None:
+            from_person = name
+        if to_person is None:
+            # デフォルトの宛先を推測
+            if name == "Player":
+                to_person = "supply_manager" if manager_type == "supply" else "information_manager"
+            elif "ワーカー" in name:
+                to_person = "supply_manager" if manager_type == "supply" else "information_manager"
+            elif name in ["supply_manager", "information_manager"]:
+                to_person = "Player"  # デフォルトはPlayerに報告
+            else:
+                to_person = "Player"
+
+        # 現在時刻を取得
+        current_time = self.time_manager.get_current_time()
+
+        message = {
+            "role": role,
+            "name": name,
+            "content": content,
+            "from": from_person,
+            "to": to_person,
+            "timestamp": current_time
+        }
 
         if manager_type == "information":
             self.info_conversation_history.append(message)
@@ -72,10 +106,22 @@ class ChatWithMemory:
         # 全体の履歴にも追加（情報付与用）
         self.conversation_history.append(message)
 
+        # 各人物の会話ボックスに追加
+        # 発信者のボックスに追加
+        if from_person in self.person_histories:
+            self.person_histories[from_person].append(message)
+
+        # 宛先のボックスに追加（発信者と宛先が異なる場合のみ）
+        if to_person != from_person and to_person in self.person_histories:
+            self.person_histories[to_person].append(message)
+
     def clear_history(self):
         self.conversation_history = []
         self.info_conversation_history = []
         self.supply_conversation_history = []
+        # 各人物の会話履歴もクリア
+        for person in self.person_histories:
+            self.person_histories[person] = []
 
     def get_conversation_history(self, manager_type: str = "all") -> List[Dict[str, str]]:
         if manager_type == "information":
@@ -84,6 +130,16 @@ class ChatWithMemory:
             return self.supply_conversation_history.copy()
         else:
             return self.conversation_history.copy()
+
+    def get_person_history(self, person: str) -> List[Dict[str, str]]:
+        """特定の人物の会話履歴を取得"""
+        if person in self.person_histories:
+            return self.person_histories[person].copy()
+        return []
+
+    def get_all_person_histories(self) -> Dict[str, List[Dict[str, str]]]:
+        """全ての人物の会話履歴を取得"""
+        return {person: history.copy() for person, history in self.person_histories.items()}
 
 
     def send_message(self, user_message: str) -> str:
@@ -139,13 +195,25 @@ class ChatWithMemory:
         # 両方のマネージャーのタスク戻りを処理
         info_return_message = self.info_manager.handle_return_from_task()
         if info_return_message:
-            print(f"\n{info_return_message}")
-            self.add_message("user", "information_manager", info_return_message, "information")
+            if isinstance(info_return_message, dict):
+                message = info_return_message.get("message", "")
+                to_person = info_return_message.get("to", "Player")
+            else:
+                message = info_return_message
+                to_person = "Player"
+            print(f"\n{message}")
+            self.add_message("user", "information_manager", message, "information", from_person="information_manager", to_person=to_person)
 
         supply_return_message = self.supply_manager.handle_return_from_task()
         if supply_return_message:
-            print(f"\n{supply_return_message}")
-            self.add_message("user", "supply_manager", supply_return_message, "supply")
+            if isinstance(supply_return_message, dict):
+                message = supply_return_message.get("message", "")
+                to_person = supply_return_message.get("to", "Player")
+            else:
+                message = supply_return_message
+                to_person = "Player"
+            print(f"\n{message}")
+            self.add_message("user", "supply_manager", message, "supply", from_person="supply_manager", to_person=to_person)
 
         # 会話中のみ情報付与を一時停止（離席中は情報付与継続）
         # information_managerのみが情報付与を受け取る
@@ -163,7 +231,9 @@ class ChatWithMemory:
 
                 # 会話ログにsystemメッセージとして追加
                 system_message = f"【情報付与】{info.source}: {info.subject}\n{info.content}"
-                self.add_message("system", "System", system_message)
+                # PlayerとInformation Managerに情報付与を追加
+                self.add_message("system", "System", system_message, "information", from_person="System", to_person="Player")
+                self.add_message("system", "System", system_message, "information", from_person="System", to_person="information_manager")
             print()
         return len(infos) > 0
 
