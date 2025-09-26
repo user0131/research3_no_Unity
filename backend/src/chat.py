@@ -111,8 +111,21 @@ class ChatWithMemory:
         if from_person in self.person_histories:
             self.person_histories[from_person].append(message)
 
-        # 宛先のボックスに追加（発信者と宛先が異なる場合のみ）
-        if to_person != from_person and to_person in self.person_histories:
+        # 特別な宛先処理（チーム全体への通知）
+        if to_person == "information_team":
+            # 情報管理班全体（PlayerとInformation Manager）に追加
+            if "Player" in self.person_histories:
+                self.person_histories["Player"].append(message)
+            if "information_manager" in self.person_histories:
+                self.person_histories["information_manager"].append(message)
+        elif to_person == "supply_team":
+            # 物資管理班全体（supply_manager, ワーカーA/B/C）に追加
+            supply_team_members = ["supply_manager", "ワーカーA", "ワーカーB", "ワーカーC"]
+            for member in supply_team_members:
+                if member in self.person_histories and member != from_person:
+                    self.person_histories[member].append(message)
+        elif to_person != from_person and to_person in self.person_histories:
+            # 通常の宛先のボックスに追加（発信者と宛先が異なる場合のみ）
             self.person_histories[to_person].append(message)
 
     def clear_history(self):
@@ -231,9 +244,8 @@ class ChatWithMemory:
 
                 # 会話ログにsystemメッセージとして追加
                 system_message = f"【情報付与】{info.source}: {info.subject}\n{info.content}"
-                # PlayerとInformation Managerに情報付与を追加
-                self.add_message("system", "System", system_message, "information", from_person="System", to_person="Player")
-                self.add_message("system", "System", system_message, "information", from_person="System", to_person="information_manager")
+                # 情報管理班全体への通知（PlayerとInformation Managerの両方が見れる）
+                self.add_message("system", "System", system_message, "information", from_person="System", to_person="information_team")
             print()
         return len(infos) > 0
 

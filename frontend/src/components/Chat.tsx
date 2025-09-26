@@ -76,7 +76,8 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // IME変換中（日本語入力中）は送信しない
+    if (e.key === 'Enter' && !e.shiftKey && !(e.nativeEvent as any).isComposing) {
       e.preventDefault();
       sendMessage();
     }
