@@ -82,6 +82,43 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
     }
   };
 
+  const getMessageDirection = (message: Message) => {
+    // Playerの発言のみ右側、それ以外（管理班、ワーカー等）は左側に表示
+    if (message.name && message.name.toLowerCase() === 'player') {
+      return 'sent';
+    } else {
+      return 'received';
+    }
+  };
+
+  const getPersonDisplayName = (personName: string) => {
+    const nameMap: { [key: string]: string } = {
+      'Player': 'Player',
+      'supply_manager': '物資Manager',
+      'information_manager': '情報Manager',
+      'SUPPLY_MANAGER': '物資Manager',
+      'INFORMATION_MANAGER': '情報Manager',
+      'ワーカーA': 'Worker A',
+      'ワーカーB': 'Worker B',
+      'ワーカーC': 'Worker C',
+      'System': 'System',
+      'SYSTEM': 'System'
+    };
+    return nameMap[personName] || personName;
+  };
+
+  const getMessageDirectionLabel = (message: Message, direction: string) => {
+    if (direction === 'sent') {
+      // Playerの発言：「→ 相手」
+      const toName = message.to || (selectedManager === 'information' ? '情報Manager' : '物資Manager');
+      return `→ ${getPersonDisplayName(toName)}`;
+    } else {
+      // それ以外：「from → to」
+      const fromName = getPersonDisplayName(message.from || message.name || 'System');
+      const toName = message.to ? getPersonDisplayName(message.to) : 'Player';
+      return `${fromName} → ${toName}`;
+    }
+  };
 
   return (
     <div className="chat-container">
@@ -93,20 +130,30 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
       </div>
 
       <div className="messages-container">
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`message ${message.role === 'user' ? 'user-message' : 'assistant-message'}`}
-          >
-            <div className="message-header">
-              <span className="message-role">{message.name || message.role}</span>
-              {message.timestamp && (
-                <span className="message-timestamp">{message.timestamp}</span>
-              )}
+        {messages.map((message, index) => {
+          const direction = getMessageDirection(message);
+          return (
+            <div
+              key={index}
+              className={`message ${direction === 'sent' ? 'user-message' : 'assistant-message'}`}
+            >
+              <div className="message-header">
+                <span className="message-direction">
+                  {getMessageDirectionLabel(message, direction)}
+                </span>
+                <div className="message-meta">
+                  {message.timestamp && (
+                    <span className="message-time">{message.timestamp}</span>
+                  )}
+                  <span className="message-role">
+                    {message.role === 'user' ? '👤' : message.role === 'assistant' ? '🤖' : '📋'}
+                  </span>
+                </div>
+              </div>
+              <div className="message-content">{message.content}</div>
             </div>
-            <div className="message-content">{message.content}</div>
-          </div>
-        ))}
+          );
+        })}
         <div ref={messagesEndRef} />
       </div>
 
@@ -115,7 +162,7 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
           type="text"
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
-          onKeyPress={handleKeyPress}
+          onKeyDown={handleKeyPress}
           placeholder="メッセージを入力..."
           disabled={isLoading}
           className="message-input"
