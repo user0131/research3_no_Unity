@@ -21,7 +21,7 @@ class TimeManager:
         self.callback = callback
 
         # 倍速設定から実際の間隔を計算
-        base_interval = 60  # 基準: 60秒で1分進む
+        base_interval = 60  # 基準: 60秒で1分進む(通常時間)
         self.interval_seconds = base_interval / speed_multiplier
         self.advance_minutes = 1
 

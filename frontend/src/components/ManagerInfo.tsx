@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../api/client';
-import { ManagerDebugData, Message } from '../types';
+import { ManagerDebugData, Message } from '../types'; // 型設定
 import './ManagerInfo.css';
 
 interface ManagerInfoProps {
@@ -8,7 +8,7 @@ interface ManagerInfoProps {
 }
 
 const ManagerInfo: React.FC<ManagerInfoProps> = ({ managerType }) => {
-  const [managerData, setManagerData] = useState<ManagerDebugData | null>(null);
+  const [managerData, setManagerData] = useState<ManagerDebugData | null>(null); // ManageDebucDataとは
   const [conversationHistory, setConversationHistory] = useState<Message[]>([]);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => {
     const saved = localStorage.getItem(`expandedSections_${managerType}`);
@@ -73,7 +73,7 @@ const ManagerInfo: React.FC<ManagerInfoProps> = ({ managerType }) => {
   };
 
   if (!managerData) {
-    return <div className="manager-info-loading">読み込み中...</div>;
+    return <div className="manager-info-loading">読み込み中...</div>; // 
   }
 
   return (

@@ -1,3 +1,6 @@
+"""
+csv関連の操作を決定するファイル
+"""
 from __future__ import annotations
 
 import os
@@ -14,8 +17,8 @@ class CSVFormSpec(BaseModel):
     columns: List[str]
     rows: Optional[List[List[Any]]] = None
     description: Optional[str] = None
-    delimiter: str = ","
-    quotechar: str = '"'
+    delimiter: str = "," # delimiterは区切り
+    quotechar: str = '"' # quotecharは文章の引用
 
     @field_validator("columns") # Pydanticのデコレータで、columnsフィールドの値を検証する関数を定義
     @classmethod
@@ -30,7 +33,7 @@ class CSVFormSpec(BaseModel):
         if rows is None:
             return rows  # Noneならそのまま
 
-        cols = info.data.get("columns") or []  # columnsの値を取得
+        cols = info.data.get("columns") or [] # columnsの値を取得
         for r in rows:
             if len(r) != len(cols):  # 各行の要素数がcolumns数と違えばエラー
                 raise ValueError(f"初期行の列数が columns と一致しません: {r}")
@@ -111,12 +114,12 @@ def _read_knowledge_csvs(knowledge_path: Path) -> List[Dict[str, str]]:
     if not knowledge_path.exists():
         return items
     text = knowledge_path.read_text(encoding="utf-8")
-    blocks = re.split(r"\n\s*##\s*", text)
+    blocks = re.split(r"\n\s*###\s*", text)
     for b in blocks:
-        if "【既存CSV】" not in b:
+        if "【" not in b or "】" not in b:
             continue
         title_line = b.splitlines()[0] if b.splitlines() else ""
-        m_title = re.search(r"【既存CSV】(.+)", title_line)
+        m_title = re.search(r"【(.+?)】", title_line)
         title = m_title.group(1).strip() if m_title else "(不明)"
         m_desc = re.search(r"説明:\s*(.+)", b)
         m_cols = re.search(r"現状のカラム:\s*(.+)", b)
@@ -157,8 +160,23 @@ def create_csv_file(
 
     spec = CSVFormSpec.model_validate(form_spec).model_dump()
 
-    outdir = _ensure_outdir(filename)
-    path = outdir / Path(filename).name
+    # knowledge_pathからCSVディレクトリを自動判定
+    # 例: knowledge_information.txt → csv/information/
+    #     knowledge_supply.txt → csv/supply/
+    csv_dir = None
+    if knowledge_path:
+        knowledge_name = Path(knowledge_path).stem
+        if knowledge_name.startswith("knowledge_"):
+            csv_dir = knowledge_name.replace("knowledge_", "")
+
+    # ファイル名にディレクトリが含まれている場合はそのまま使用
+    if "/" in filename:
+        path = Path("csv") / filename
+    elif csv_dir:
+        path = Path("csv") / csv_dir / filename
+    else:
+        outdir = _ensure_outdir(filename)
+        path = outdir / filename
 
     with open(path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -168,7 +186,7 @@ def create_csv_file(
                 raise ValueError(f"初期行の列数が columns と一致しません: {row}")
             writer.writerow(row)
 
-    # knowledge に登録
+    # knowledge に登録　column_descriptions パラメータとして Dict[str, str] 型で受け取り、各カラムの説明を knowledgeファイルに書き込む
     if knowledge_path:
         try:
             knowledge_file = Path(knowledge_path)
@@ -439,12 +457,12 @@ def _apply_update_plan_csv_full(path: str, plan: Dict[str, Any], knowledge_file:
         _write_csv_all(path, header, rows)
         out_path = path
 
-    # knowledgeのカラム情報を更新
-    filename = Path(path).name
-    _update_knowledge_columns(knowledge_file, filename, header)
+    # knowledgeのカラム情報を更新（csvディレクトリからの相対パス）
+    csv_relative_path = Path(path).relative_to(Path("csv")) if Path(path).is_relative_to(Path("csv")) else Path(path).name
+    _update_knowledge_columns(knowledge_file, str(csv_relative_path), header)
 
     # CSV更新記録をknowledgeに追加
-    _add_update_record_to_knowledge(knowledge_file, filename, plan, time_manager, cell_changes)
+    _add_update_record_to_knowledge(knowledge_file, str(csv_relative_path), plan, time_manager, cell_changes)
 
     return out_path
 
@@ -475,9 +493,18 @@ def update_csv_from_knowledge(
 
     # 対象ファイル決定
     filename = plan.filename or items[0]['title']
+
+    # knowledge_pathからCSVディレクトリを自動判定
+    csv_dir = None
+    knowledge_name = knowledge_file.stem
+    if knowledge_name.startswith("knowledge_"):
+        csv_dir = knowledge_name.replace("knowledge_", "")
+
     # ディレクトリ情報を考慮してパスを構築
     if "/" in filename:
         target_path = f"csv/{filename}"
+    elif csv_dir:
+        target_path = f"csv/{csv_dir}/{filename}"
     else:
         target_path = f"csv/{filename}"
 

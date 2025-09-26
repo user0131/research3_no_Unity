@@ -1,3 +1,6 @@
+"""
+CSVファイルからスケジュール情報を読み込み
+"""
 import csv
 from typing import List
 from pathlib import Path
@@ -45,7 +48,7 @@ class InfProvider:
                             subject=row['件名'],
                             content=row['付与内容']
                         )
-                        # 既存の付与内容と重複しないか確認
+                        # 既存の付与内容と重複しないか確認（二重付与防止）
                         exists = any(
                             s.time_str == info.time_str and
                             s.source == info.source and

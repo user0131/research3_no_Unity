@@ -231,6 +231,8 @@ def get_manager_debug_data():
                     for csv_file in csv_path.glob("*.csv"):
                         try:
                             df = pd.read_csv(csv_file)
+                            # NaN値を空文字列に変換(⭐️これがないとnullは表示できないためおかしくなる)
+                            df = df.fillna('')
                             info_data["csv_files"][csv_file.name] = {
                                 "shape": df.shape,
                                 "columns": df.columns.tolist(),
@@ -306,6 +308,8 @@ def get_manager_debug_data():
                     for csv_file in csv_path.glob("*.csv"):
                         try:
                             df = pd.read_csv(csv_file)
+                            # NaN値を空文字列に変換
+                            df = df.fillna('')
                             supply_data["csv_files"][csv_file.name] = {
                                 "shape": df.shape,
                                 "columns": df.columns.tolist(),

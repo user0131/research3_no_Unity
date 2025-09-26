@@ -16,7 +16,7 @@ export interface ManagerStatus {
   };
 }
 
-export interface ManagerDebugData {
+export interface ManagerDebugData { // 記憶の表示する型を設定している。
   name: string;
   class: string;
   status: {
@@ -53,5 +53,5 @@ export interface SystemInfo {
     scheduled_tasks_count: number;
     simulation_time?: string;
   };
-  global_conversation_history_count: number;
+  global_conversation_history_count: number; // TODO これは何か
 }

@@ -10,7 +10,7 @@ def rag_read(query: str) -> str:
     try:
         sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
         from rag_db_maker import load_retriever
-        from config.constants import VECTOR_DB_PATH, HIRAKATA_JISIN_VECTOR
+        from config.constants import VECTOR_DB_PATH, HIRAKATA_JISIN_VECTOR # TODO 全てのpathを、統合してconfigで管理できるようにする
 
         db_path = os.path.join(VECTOR_DB_PATH, HIRAKATA_JISIN_VECTOR)
         if not os.path.exists(db_path):
@@ -23,7 +23,7 @@ def rag_read(query: str) -> str:
         results = retriever.invoke(query)
 
         blocks = []
-        for i, doc in enumerate(results[:5], 1):  # 上位5件
+        for i, doc in enumerate(results[:5], 1):  # 上位5件 # TODO 調べた内容を記憶に入れる時にも何かしら考慮
             m = getattr(doc, "metadata", {}) or {}
             chapter = m.get('chapter') or ''
             section = m.get('section') or ''
@@ -37,7 +37,7 @@ def rag_read(query: str) -> str:
         if not blocks:
             return f"該当なし: {query}"
 
-        return f"Query: {query}\n\n" + "\n\n".join(blocks)
+        return f"Query: {query}\n\n" + "\n\n".join(blocks) # ragの内容を出力
 
     except Exception as e:
         return f"ベクトル検索エラー: {str(e)}"

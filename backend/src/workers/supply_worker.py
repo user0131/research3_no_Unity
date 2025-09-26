@@ -3,6 +3,9 @@ from typing import Dict, Any
 from pathlib import Path
 from .base_worker import BaseWorker
 from openai import OpenAI
+import sys
+sys.path.append(str(Path(__file__).parent.parent))
+from csv_operations import update_csv_from_knowledge
 
 
 class SupplyWorker(BaseWorker):
@@ -24,6 +27,7 @@ class SupplyWorker(BaseWorker):
 
         self.inventory_path = Path("./csv/supply/物資在庫情報.csv")
         self.delivery_log_path = Path("./csv/supply/物資配送記録.csv")
+        self.knowledge_path = Path("./src/knowledge/knowledge_supply.txt")
         self.task_data = None
 
     def start_task(self, task_description: str, task_data: Dict[str, Any]) -> str:
@@ -57,43 +61,58 @@ class SupplyWorker(BaseWorker):
         unit = self.task_data.get("unit", "")
 
         try:
-            # 在庫を減らす
-            rows = []
-            updated = False
+            # 在庫情報を取得
+            row_index = None
+            current_stock = 0
 
             with open(self.inventory_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames
-
-                for row in reader:
+                for idx, row in enumerate(reader):
                     if item_name in row['物資名']:
+                        row_index = idx
                         current_stock = int(row['在庫数'])
-                        new_stock = max(0, current_stock - quantity)
-                        row['在庫数'] = str(new_stock)
-                        updated = True
                         if not unit:
                             unit = row['単位']
-                    rows.append(row)
+                        break
 
-            if updated:
-                with open(self.inventory_path, 'w', encoding='utf-8', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                    writer.writeheader()
-                    writer.writerows(rows)
+            # 在庫を減らす
+            if row_index is not None:
+                new_stock = max(0, current_stock - quantity)
+                update_csv_from_knowledge(
+                    update_spec={
+                        "filename": "物資在庫情報.csv",
+                        "update_cells": [
+                            {"row_index": row_index, "column": "在庫数", "value": str(new_stock)}
+                        ]
+                    },
+                    knowledge_path=str(self.knowledge_path),
+                    time_manager=self.time_manager
+                )
 
             # 配送記録を追加
             current_time = self.time_manager.get_current_time()
-            with open(self.delivery_log_path, 'a', encoding='utf-8', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    current_time,
-                    shelter_name,
-                    item_name,
-                    quantity,
-                    unit,
-                    self.worker_name,
-                    "避難所要請対応"
-                ])
+            update_csv_from_knowledge(
+                update_spec={
+                    "filename": "物資配送記録.csv",
+                    "append_rows": [
+                        {
+                            "objects": [
+                                {
+                                    "配送時刻": current_time,
+                                    "配送先": shelter_name,
+                                    "物資名": item_name,
+                                    "数量": str(quantity),
+                                    "単位": unit,
+                                    "担当者": self.worker_name,
+                                    "備考": "避難所要請対応"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                knowledge_path=str(self.knowledge_path),
+                time_manager=self.time_manager
+            )
 
             return {
                 "success": True,
@@ -116,29 +135,33 @@ class SupplyWorker(BaseWorker):
         quantity = self.task_data.get("quantity", 0)
 
         try:
-            # 在庫を増やす
-            rows = []
-            updated = False
+            # 在庫情報を取得
+            row_index = None
+            current_stock = 0
             unit = ""
 
             with open(self.inventory_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames
-
-                for row in reader:
+                for idx, row in enumerate(reader):
                     if item_name in row['物資名']:
+                        row_index = idx
                         current_stock = int(row['在庫数'])
-                        new_stock = current_stock + quantity
-                        row['在庫数'] = str(new_stock)
                         unit = row['単位']
-                        updated = True
-                    rows.append(row)
+                        break
 
-            if updated:
-                with open(self.inventory_path, 'w', encoding='utf-8', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                    writer.writeheader()
-                    writer.writerows(rows)
+            # 在庫を増やす
+            if row_index is not None:
+                new_stock = current_stock + quantity
+                update_csv_from_knowledge(
+                    update_spec={
+                        "filename": "物資在庫情報.csv",
+                        "update_cells": [
+                            {"row_index": row_index, "column": "在庫数", "value": str(new_stock)}
+                        ]
+                    },
+                    knowledge_path=str(self.knowledge_path),
+                    time_manager=self.time_manager
+                )
 
                 return {
                     "success": True,
@@ -166,10 +189,9 @@ class SupplyWorker(BaseWorker):
         # LLMで上司への報告を生成
         worker_report = self._generate_report_to_manager(task_result)
 
-        # マネージャーの会話履歴に追加
-        if hasattr(self.manager, 'add_message'):
-            # supply_manager用の会話履歴に追加
-            self.manager.add_message("user", self.worker_name, worker_report, "supply")
+        # マネージャーの会話履歴に追加（ChatWithMemory経由）
+        if hasattr(self.manager, 'manager') and hasattr(self.manager.manager, 'add_message'):
+            self.manager.manager.add_message("user", self.worker_name, worker_report, "supply")
 
         # タスク状態をリセット
         self.is_busy = False
@@ -205,9 +227,8 @@ class SupplyWorker(BaseWorker):
 """
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": report_prompt}],
-                max_tokens=200
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": report_prompt}]
             )
 
             return response.choices[0].message.content

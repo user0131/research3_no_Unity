@@ -10,6 +10,7 @@ from openai import OpenAI
 # workersモジュールのインポート
 sys.path.append(str(Path(__file__).parent.parent))
 from workers.supply_worker import SupplyWorker
+from csv_operations import update_csv_from_knowledge
 
 
 class SupplyManager:
@@ -146,26 +147,29 @@ class SupplyManager:
     def update_inventory(self, item_name: str, quantity: int) -> bool:
         """在庫を更新（配送により減少）"""
         try:
-            rows = []
-            updated = False
+            row_index = None
+            current_stock = 0
 
             with open(self.inventory_csv_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames
-
-                for row in reader:
+                for idx, row in enumerate(reader):
                     if item_name in row['物資名']:
+                        row_index = idx
                         current_stock = int(row['在庫数'])
-                        new_stock = max(0, current_stock - quantity)
-                        row['在庫数'] = str(new_stock)
-                        updated = True
-                    rows.append(row)
+                        break
 
-            if updated:
-                with open(self.inventory_csv_path, 'w', encoding='utf-8', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                    writer.writeheader()
-                    writer.writerows(rows)
+            if row_index is not None:
+                new_stock = max(0, current_stock - quantity)
+                update_csv_from_knowledge(
+                    update_spec={
+                        "filename": "物資在庫情報.csv",
+                        "update_cells": [
+                            {"row_index": row_index, "column": "在庫数", "value": str(new_stock)}
+                        ]
+                    },
+                    knowledge_path=str(self.knowledge_path),
+                    time_manager=self.time_manager
+                )
                 return True
             return False
         except Exception as e:
@@ -175,26 +179,29 @@ class SupplyManager:
     def add_inventory(self, item_name: str, quantity: int) -> bool:
         """在庫を追加（調達により増加）"""
         try:
-            rows = []
-            updated = False
+            row_index = None
+            current_stock = 0
 
             with open(self.inventory_csv_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
-                fieldnames = reader.fieldnames
-
-                for row in reader:
+                for idx, row in enumerate(reader):
                     if item_name in row['物資名']:
+                        row_index = idx
                         current_stock = int(row['在庫数'])
-                        new_stock = current_stock + quantity
-                        row['在庫数'] = str(new_stock)
-                        updated = True
-                    rows.append(row)
+                        break
 
-            if updated:
-                with open(self.inventory_csv_path, 'w', encoding='utf-8', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=fieldnames)
-                    writer.writeheader()
-                    writer.writerows(rows)
+            if row_index is not None:
+                new_stock = current_stock + quantity
+                update_csv_from_knowledge(
+                    update_spec={
+                        "filename": "物資在庫情報.csv",
+                        "update_cells": [
+                            {"row_index": row_index, "column": "在庫数", "value": str(new_stock)}
+                        ]
+                    },
+                    knowledge_path=str(self.knowledge_path),
+                    time_manager=self.time_manager
+                )
                 return True
             return False
         except Exception as e:
@@ -205,17 +212,28 @@ class SupplyManager:
         """配送記録を追加"""
         try:
             current_time = self.time_manager.get_current_time()
-            with open(self.delivery_log_path, 'a', encoding='utf-8', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    current_time,
-                    shelter_name,
-                    item_name,
-                    quantity,
-                    unit,
-                    "supply_manager",
-                    "避難所要請対応"
-                ])
+            update_csv_from_knowledge(
+                update_spec={
+                    "filename": "物資配送記録.csv",
+                    "append_rows": [
+                        {
+                            "objects": [
+                                {
+                                    "配送時刻": current_time,
+                                    "配送先": shelter_name,
+                                    "物資名": item_name,
+                                    "数量": str(quantity),
+                                    "単位": unit,
+                                    "担当者": "supply_manager",
+                                    "備考": "避難所要請対応"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                knowledge_path=str(self.knowledge_path),
+                time_manager=self.time_manager
+            )
         except Exception as e:
             print(f"配送記録エラー: {e}")
 
@@ -223,17 +241,19 @@ class SupplyManager:
         """ツール実行結果からレスポンスメッセージを作成"""
         args = args or {}
 
+        # 確認系（マネージャー専用）
         if tool_name == "check_inventory":
-            return self._handle_task_assignment("check_inventory", args)
-
-        elif tool_name == "deliver_supplies":
-            return self._handle_task_assignment("deliver_supplies", args)
+            return self._execute_manager_task("check_inventory", args)
 
         elif tool_name == "show_inventory":
-            return self._handle_task_assignment("show_inventory", args)
+            return self._execute_manager_task("show_inventory", args)
 
         elif tool_name == "show_delivery_log":
-            return self._handle_task_assignment("show_delivery_log", args)
+            return self._execute_manager_task("show_delivery_log", args)
+
+        # 実行系（ワーカー指定可能）
+        elif tool_name == "deliver_supplies":
+            return self._handle_task_assignment("deliver_supplies", args)
 
         elif tool_name == "procure_supplies":
             return self._handle_task_assignment("procure_supplies", args)
@@ -300,9 +320,8 @@ class SupplyManager:
 """
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": instruction_prompt}],
-                max_tokens=100
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": instruction_prompt}]
             )
 
             return response.choices[0].message.content
@@ -326,9 +345,8 @@ class SupplyManager:
 """
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": acceptance_prompt}],
-                max_tokens=100
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": acceptance_prompt}]
             )
 
             return response.choices[0].message.content
@@ -354,7 +372,24 @@ class SupplyManager:
             return f"（マネージャー自身で確認）{self.get_inventory_summary()}"
 
         elif function_name == "show_delivery_log":
-            return self.execute_task_with_delay("配送記録確認", args)
+            shelter_name = args.get("shelter_name", "")
+            try:
+                logs = []
+                with open(self.delivery_log_path, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if not shelter_name or shelter_name in row.get('配送先', ''):
+                            logs.append(f"{row.get('配送時刻', '')} - {row.get('配送先', '')}: {row.get('物資名', '')} {row.get('数量', '')}{row.get('単位', '')}")
+
+                if logs:
+                    if shelter_name:
+                        return f"（マネージャー自身で確認）{shelter_name}への配送記録:\n" + "\n".join(logs[-10:])
+                    else:
+                        return f"（マネージャー自身で確認）最近の配送記録:\n" + "\n".join(logs[-10:])
+                else:
+                    return f"（マネージャー自身で確認）配送記録が見つかりません。"
+            except Exception:
+                return f"（マネージャー自身で確認）配送記録の読み込みに失敗しました。"
 
         elif function_name == "procure_supplies":
             self.pending_procurement = args
@@ -464,29 +499,41 @@ class SupplyManager:
             if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
                 self.manager.add_message("user", "supply_manager", manager_completion_message, "supply")
 
+            manager_return_message = manager_completion_message
+
             self.away_until_time = None
             self.current_task_description = None
+        else:
+            manager_return_message = None
 
         # ワーカーのタスク完了チェック
         completed_workers = self._check_worker_completions()
         if completed_workers:
-            # 各ワーカーの完了報告に対してマネージャーが感謝の返事
+            # 各ワーカーの完了報告を処理
             for worker_result in completed_workers:
                 worker_name = worker_result["worker_name"]
-                task_description = worker_result["task"]
+                worker_report = worker_result["report"]
 
-                # マネージャーからワーカーへの感謝メッセージを生成・追加
-                thank_you_message = self._generate_thank_you_message(worker_name, task_description)
-                if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
-                    self.manager.add_message("user", "supply_manager", thank_you_message, "supply")
+                # マネージャーがWorkerの報告を見て、Playerに報告すべきか判断
+                manager_response = self._process_worker_report(worker_name, worker_report)
 
-            # ワーカーのタスクを完了リストに追加
-            all_completed_tasks.extend(completed_workers)
+                # 注意: manager_responseは戻り値として返され、chat.pyで履歴に追加される
 
-        # 完了したタスクがある場合、まとめてPlayerに報告
-        if all_completed_tasks:
-            player_message = self._generate_player_completion_message(all_completed_tasks)
-            return player_message
+                all_completed_tasks.append({
+                    "worker_name": worker_name,
+                    "report": worker_report,
+                    "manager_response": manager_response
+                })
+
+        # マネージャー自身のタスク完了報告
+        if manager_return_message and all_completed_tasks:
+            # マネージャー自身とワーカーの両方が完了した場合、まとめて報告
+            return f"{manager_return_message}\n\n{all_completed_tasks[0]['manager_response']}"
+        elif manager_return_message:
+            return manager_return_message
+        elif all_completed_tasks:
+            # ワーカーのタスクのみ完了した場合、最後のマネージャー応答を返す
+            return all_completed_tasks[-1]['manager_response']
 
         return None
 
@@ -504,6 +551,51 @@ class SupplyManager:
 
         return completed_results
 
+    def _process_worker_report(self, worker_name: str, worker_report: str) -> str:
+        """Workerの完了報告を処理し、Playerへの報告または次のアクションを決定"""
+        try:
+            client = self.client
+
+            # 現在の会話履歴を取得（最近の10件程度）
+            if hasattr(self, 'manager'):
+                recent_history = self.manager.get_conversation_history("supply")[-10:]
+                history_text = "\n".join([f"{msg.get('name', msg['role'])}: {msg['content']}" for msg in recent_history])
+            else:
+                history_text = "（会話履歴なし）"
+
+            process_prompt = f"""
+あなたはsupply_managerです。{worker_name}から作業完了の報告を受けました。
+
+【最近の会話履歴】
+{history_text}
+
+【{worker_name}からの報告】
+{worker_report}
+
+この報告を受けて、あなたは以下のいずれかの対応を取ります：
+
+1. **Playerに報告する**: タスクが成功した場合、またはPlayerの判断が必要な場合
+   → 「〜の作業が完了しました」のように、Playerに状況を報告してください
+
+2. **Workerに追加指示を出す**: 報告内容から追加作業が必要と判断した場合
+   → 「〜については、次に△△をお願いします」のように、次のアクションを指示してください
+
+3. **自分で対応を考える**: 問題があり、自分で調査や判断が必要な場合
+   → 「〜の件、確認して対応します」のように、自分の対応を表明してください
+
+上記を踏まえて、自然な話し言葉で応答してください。
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": process_prompt}]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception:
+            return f"{worker_name}からの報告を確認しました。Playerに状況を報告します。"
+
     def _generate_thank_you_message(self, worker_name: str, task_description: str) -> str:
         """ワーカーの完了報告に対するマネージャーの感謝メッセージを生成"""
         try:
@@ -519,9 +611,8 @@ class SupplyManager:
 """
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": thank_you_prompt}],
-                max_tokens=50
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": thank_you_prompt}]
             )
 
             return response.choices[0].message.content
@@ -546,9 +637,8 @@ class SupplyManager:
 """
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": completion_prompt}],
-                max_tokens=50
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": completion_prompt}]
             )
 
             return response.choices[0].message.content
@@ -579,9 +669,8 @@ Playerに対して、これらのタスクが完了したことを報告する�
 """
 
             response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": completion_prompt}],
-                max_tokens=150
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": completion_prompt}]
             )
 
             return response.choices[0].message.content
@@ -595,19 +684,18 @@ Playerに対して、これらのタスクが完了したことを報告する�
         """Function calling用の定義を取得"""
         defs = []
 
-        # 在庫確認（ワーカー指定可能）
+        # 在庫確認（マネージャー専用）
         defs.append({
             "type": "function",
             "function": {
                 "name": "check_inventory",
-                "description": "特定の物資の在庫数を確認する。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
+                "description": "特定の物資の在庫数を確認する。マネージャー自身が実行。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "item_name": {"type": "string", "description": "確認する物資名"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["ワーカーA", "ワーカーB", "ワーカーC", "マネージャー自身"]}
+                        "item_name": {"type": "string", "description": "確認する物資名"}
                     },
-                    "required": ["item_name", "assigned_worker"]
+                    "required": ["item_name"]
                 }
             }
         })
@@ -631,35 +719,32 @@ Playerに対して、これらのタスクが完了したことを報告する�
             }
         })
 
-        # 在庫一覧表示（ワーカー指定可能）
+        # 在庫一覧表示（マネージャー専用）
         defs.append({
             "type": "function",
             "function": {
                 "name": "show_inventory",
-                "description": "現在の在庫一覧を表示する。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
+                "description": "現在の在庫一覧を表示する。マネージャー自身が実行。",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["ワーカーA", "ワーカーB", "ワーカーC", "マネージャー自身"]}
-                    },
-                    "required": ["assigned_worker"]
+                    "properties": {},
+                    "required": []
                 }
             }
         })
 
-        # 配送記録確認（ワーカー指定可能）
+        # 配送記録確認（マネージャー専用）
         defs.append({
             "type": "function",
             "function": {
                 "name": "show_delivery_log",
-                "description": "配送記録を確認する。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
+                "description": "配送記録を確認する。マネージャー自身が実行。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "shelter_name": {"type": "string", "description": "特定の避難所の記録のみ表示（任意）"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["ワーカーA", "ワーカーB", "ワーカーC", "マネージャー自身"]}
+                        "shelter_name": {"type": "string", "description": "特定の避難所の記録のみ表示（任意）"}
                     },
-                    "required": ["assigned_worker"]
+                    "required": []
                 }
             }
         })
@@ -713,7 +798,32 @@ Playerに対して、これらのタスクが完了したことを報告する�
             args = json.loads(tool_call.function.arguments or "{}")
 
             if fname:
-                assistant_message = self.create_tool_response(fname, args)
+                tool_result = self.create_tool_response(fname, args)
+
+                # 確認系（即座実行）の場合は、結果をLLMに渡して自然な会話にする
+                if fname in ["check_inventory", "show_inventory", "show_delivery_log"]:
+                    # ツール実行結果を会話履歴に追加してLLMに再度問い合わせ
+                    filtered_messages.append({
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [tool_call.model_dump()]
+                    })
+                    filtered_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "name": fname,
+                        "content": tool_result
+                    })
+
+                    # LLMに結果を解釈させる
+                    second_response = self.client.chat.completions.create(
+                        model="gpt-5-mini",
+                        messages=filtered_messages
+                    )
+                    assistant_message = second_response.choices[0].message.content
+                else:
+                    # 実行系（2分待機）はそのまま返す
+                    assistant_message = tool_result
             else:
                 assistant_message = "no_tool"
         else:

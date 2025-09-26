@@ -123,19 +123,11 @@ class InformationManager:
                 self.pending_search_query = None
             elif task_name == "CSV作成" and self.pending_search_query:
                 if isinstance(self.pending_search_query, dict):
-                    # CSVの保存先をinformationフォルダに変更
-                    if 'filename' in self.pending_search_query:
-                        filename = self.pending_search_query['filename']
-                        self.pending_search_query['filename'] = f"information/{filename}"
                     create_csv_file(**self.pending_search_query, knowledge_path=str(self.knowledge_path), time_manager=self.time_manager)
                 return_message = f"{task_name}から戻りました！"
                 self.pending_search_query = None
             elif task_name == "CSV更新" and self.pending_search_query:
                 if isinstance(self.pending_search_query, dict):
-                    # CSVの更新対象をinformationフォルダに変更
-                    if 'update_spec' in self.pending_search_query and 'filename' in self.pending_search_query['update_spec']:
-                        filename = self.pending_search_query['update_spec']['filename']
-                        self.pending_search_query['update_spec']['filename'] = f"information/{filename}"
                     update_csv_from_knowledge(**self.pending_search_query, knowledge_path=str(self.knowledge_path), time_manager=self.time_manager)
                 return_message = f"{task_name}から戻りました！"
                 self.pending_search_query = None
@@ -160,17 +152,17 @@ class InformationManager:
             "type": "function",
             "function": {
                 "name": "create_csv_file",
-                "description": "columns/rows を指定して CSV を生成し、保存パスを返す。",
+                "description": "CSV ファイルを新規作成する。descriptionにはファイル全体の説明のみ記入し、各カラムの説明は必ずcolumn_descriptionsに記入すること。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "filename": {"type": "string", "description": "保存ファイル名。日本語名可", "default": "data.csv"},
-                        "columns": {"type": "array", "items": {"type": "string"}, "description": "ヘッダ行"},
+                        "columns": {"type": "array", "items": {"type": "string"}, "description": "ヘッダ行。例: ['氏名', '年齢', '住所', '連絡先']"},
                         "rows": {"type": "array", "items": {"type": "array", "items": {}}, "description": "初期データ行（任意）"},
-                        "description": {"type": "string", "description": "CSVファイルの用途説明（どのような時にこのファイルを使うかを説明）"},
-                        "column_descriptions": {"type": "object", "description": "各カラムの説明辞書 例: {'カラム名': '説明', ...}"}
+                        "description": {"type": "string", "description": "CSVファイル全体の用途・目的の説明。カラムの説明はここには書かずcolumn_descriptionsに記入。例: '避難者の管理用名簿'"},
+                        "column_descriptions": {"type": "object", "description": "【必須】各カラムの詳細説明。キーはカラム名、値は説明文。例: {'氏名': '避難者の氏名を記入', '年齢': '避難者の年齢を数値で記入', '住所': '避難者の現住所を記入', '連絡先': '電話番号やメールアドレス等の連絡先'}"}
                     },
-                    "required": ["columns"]
+                    "required": ["columns", "description", "column_descriptions"]
                 }
             }
         })
@@ -261,12 +253,7 @@ class InformationManager:
 
     def process_response(self, messages: List[Dict[str, str]]) -> tuple[str, Optional[str]]:
         """OpenAI APIレスポンスを処理してメッセージとロール名を返す"""
-        response = self.client.chat.completions.create(
-            model="gpt-5-mini",
-            messages=messages,
-            tools=self.get_function_definitions(),
-            tool_choice="auto"
-        )
+self.manager.manager.add_message
 
         response_message = response.choices[0].message
 
@@ -277,6 +264,7 @@ class InformationManager:
             args = json.loads(tool_call.function.arguments or "{}")
 
             if fname:
+                # ツール実行（全て2分待機タスクとして実行）
                 assistant_message = self.create_tool_response(fname, args)
             else:
                 assistant_message = "no_tool"

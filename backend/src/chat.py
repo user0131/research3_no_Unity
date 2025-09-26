@@ -29,6 +29,10 @@ class ChatWithMemory:
         self.info_manager = InformationManager(self.client, self.time_manager)
         self.supply_manager = SupplyManager(self.client, self.time_manager)
 
+        # マネージャーにChatWithMemoryへの参照を設定
+        self.info_manager.manager = self
+        self.supply_manager.manager = self
+
         # 会話履歴を分離
         self.info_conversation_history: List[Dict[str, str]] = []
         self.supply_conversation_history: List[Dict[str, str]] = []
