@@ -406,6 +406,103 @@ def get_system_debug_info():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/person/info', methods=['GET'])
+def get_person_info():
+    """人物の知識とCSV情報を取得"""
+    try:
+        person = request.args.get('person', None)
+        if not person:
+            return jsonify({"error": "person parameter is required"}), 400
+
+        chat = get_chat_instance()
+        person_info = {
+            "person": person,
+            "knowledge": "",
+            "csv_files": [],
+            "available": True
+        }
+
+        # Manager別の情報取得
+        if person == "information_manager":
+            manager = chat.info_manager
+            # 知識情報
+            person_info["knowledge"] = manager.get_knowledge()
+            # CSV情報
+            csv_files = []
+            csv_path = Path("./csv/information")
+            if csv_path.exists():
+                for csv_file in csv_path.glob("*.csv"):
+                    try:
+                        import pandas as pd
+                        df = pd.read_csv(csv_file)
+                        csv_files.append({
+                            "name": csv_file.name,
+                            "rows": len(df),
+                            "columns": df.columns.tolist()
+                        })
+                    except:
+                        csv_files.append({
+                            "name": csv_file.name,
+                            "rows": 0,
+                            "columns": []
+                        })
+            person_info["csv_files"] = csv_files
+            person_info["available"] = not manager.away_until_time
+
+        elif person == "supply_manager":
+            manager = chat.supply_manager
+            # 知識情報
+            person_info["knowledge"] = manager.get_knowledge()
+            # CSV情報
+            csv_files = []
+            csv_path = Path("./csv/supply")
+            if csv_path.exists():
+                for csv_file in csv_path.glob("*.csv"):
+                    try:
+                        import pandas as pd
+                        df = pd.read_csv(csv_file)
+                        csv_files.append({
+                            "name": csv_file.name,
+                            "rows": len(df),
+                            "columns": df.columns.tolist()
+                        })
+                    except:
+                        csv_files.append({
+                            "name": csv_file.name,
+                            "rows": 0,
+                            "columns": []
+                        })
+            person_info["csv_files"] = csv_files
+            person_info["available"] = not manager.away_until_time
+
+        elif person.startswith("ワーカー"):
+            # Workerの場合、supply_managerから情報取得
+            worker_name = person
+            workers = chat.supply_manager.workers
+            worker = None
+            for w in workers:
+                if w.worker_name == worker_name:
+                    worker = w
+                    break
+
+            if worker:
+                person_info["knowledge"] = f"担当タスク: {worker.current_task or '待機中'}"
+                person_info["available"] = worker.available
+            else:
+                person_info["knowledge"] = "Worker情報が見つかりません"
+
+        elif person == "Player":
+            person_info["knowledge"] = "災害対応訓練参加者として、情報管理班と物資管理班と連携して対応を行う"
+            person_info["available"] = True
+
+        else:
+            person_info["knowledge"] = "情報が利用できません"
+
+        return jsonify(person_info)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/system/reset', methods=['POST'])
 def reset_system():
     """システムを完全初期化（CSV、会話履歴、記憶をすべてリセット）"""

@@ -24,6 +24,7 @@
   color: #666;
 }
 
+
 .person-messages {
   flex: 1;
   overflow-y: auto;

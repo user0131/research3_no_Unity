@@ -3,6 +3,7 @@ import Chat from './components/Chat';
 import ManagerInfo from './components/ManagerInfo';
 import SystemSettings from './components/SystemSettings';
 import PersonChat from './components/PersonChat';
+import PersonInfo from './components/PersonInfo';
 import './App.css';
 
 type ViewMode = 'chat' | 'person';
@@ -116,9 +117,14 @@ function App() {
 
       <main className="app-main">
         {viewMode === 'person' ? (
-          <div className="person-view">
-            <PersonChat person={selectedPerson} />
-          </div>
+          <>
+            <div className="main-content">
+              <PersonChat person={selectedPerson} />
+            </div>
+            <div className="sidebar">
+              <PersonInfo person={selectedPerson} />
+            </div>
+          </>
         ) : (
           <>
             <div className="main-content">
