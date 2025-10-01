@@ -77,11 +77,21 @@ class SupplyManager:
 - **会話スタイル**: 同僚との自獨な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。ユーザに聞かれたこと以外は極力返さないように。
 - **情報の扱い**: あなたの知っている情報は会話履歴と「あなたが知っている知識」のみです。手持ちにない情報の推測や憶測は避けてください
 - **作業依頼**: Playerから明確に何かの作業を頼まれた場合のみ、作業を実行してください。それ以外は通常の会話をしてください。
+- **重要：ツールの使用**: 実際の作業は必ずツールを使って実行してください。会話（テキスト応答）では作業を実行できません。
+  - **ツール以外では実行不可**: 会話で「配送します」「手配しました」と言っても実際の作業は実行されません
+  - **物資配送**: deliver_suppliesツールを使用（check_inventoryは確認のみで配送は行えません）
+  - **物資調達**: procure_suppliesツールを使用
+  - **在庫確認**: check_inventoryツールを使用（確認のみ）
+  - **在庫一覧**: show_inventoryツールを使用（確認のみ）
+  - **配送記録**: show_delivery_logツールを使用（確認のみ）
+  - **必須**: タスクを実行する場合は、必ず適切なツールを呼び出してください。JSON形式の情報や配送指示を会話で返すことは禁止です。
+  - **複数回のツール呼び出し**: 在庫確認後に配送が必要な場合も、必ずdeliver_suppliesツールを呼び出してください。会話で配送内容を説明せず、ツールで実行してください。
 - **ワーカー情報の非開示**: ワーカーA、ワーカーB、ワーカーCといった具体的なワーカー名や、誰が作業をするかの詳細をPlayerに伝える必要はありません。あなたが内部的に判断して「手配します」「対応します」のように伝えてください。また、到着希望時間や担当受け取り等も聞く必要はありません。
 
 ## 重要
 - 極力あなた(supply_manager)自身が作業を行うことは避けてください。workerの手が空いていない場合は、Playerにそのことを伝え、それでもやってほしいと頼まれた場合にあなた自身が作業をしてください。
 - ユーザに聞かれたこと以外は極力返さないように。
+- 物資配送や、物資調達のツールでは、Playerに対してツール実行の報告も関数内で行います。物資配送や、物資調達のツールを使う際に、Playerに会話を返答する必要なありません。
 
 ## Playerに無理に開示しなくて大丈夫な情報：
 以下の情報は、あなたが内部的に判断するために使用します。Playerに対しては詳細を説明する必要はありません。
@@ -237,10 +247,18 @@ Playerに対しては「手配します」「対応します」のように、�
         if worker.is_busy:
             return f"{worker_name}は現在作業中です。他のワーカーを選択するか、マネージャー自身で実行してください。"
 
-        # 1. Playerに依頼内容を報告
-        player_notification = self._generate_assignment_notification(worker_name, function_name, args)
-        if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
-            self.manager.add_message("assistant", "supply_manager", player_notification, "supply", from_person="supply_manager", to_person="Player")
+        # 1. Playerに依頼内容を報告（process_responseで一括通知されるため、ここでは個別通知しない）
+        # single_task = [{
+        #     "tool_call": type('obj', (object,), {
+        #         'function': type('obj', (object,), {
+        #             'name': function_name,
+        #             'arguments': json.dumps(args)
+        #         })()
+        #     })()
+        # }]
+        # player_notification = self._generate_combined_assignment_notification(single_task)
+        # if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+        #     self.manager.add_message("assistant", "supply_manager", player_notification, "supply", from_person="supply_manager", to_person="Player")
 
         # 2. マネージャーからワーカーへの指示を会話履歴に追加
         task_instruction = self._generate_task_instruction(worker_name, function_name, args)
@@ -262,6 +280,9 @@ Playerに対しては「手配します」「対応します」のように、�
     def _convert_to_natural_response(self, function_name: str, args: Dict, worker_response: str) -> str:
         """ワーカーの応答をPlayerに伝える自然な表現に変換"""
         try:
+            # JSON形式の情報を抽出して追加タスクとして実行
+            json_tasks = self._extract_and_execute_json_tasks(worker_response)
+
             client = self.client
 
             conversion_prompt = f"""
@@ -271,7 +292,12 @@ Playerに対しては「手配します」「対応します」のように、�
 引数: {args}
 ワーカーの応答: {worker_response}
 
-この応答をPlayerに伝える際、技術的な用語（deliver_supplies、procure_suppliesなど）を使わず、自然な日本語に変換してください。
+この応答をPlayerに伝える際、以下の点に注意してください：
+- 技術的な用語（deliver_supplies、procure_suppliesなど）を使わず、自然な日本語に変換
+- JSON形式の情報（{"destination":...}など）は一切含めない
+- ワーカー名は含めない（「部下が」「担当者が」などで表現）
+- 配送の詳細情報は簡潔にまとめる
+
 例：「deliver_suppliesの実行を開始しました」→「配送を手配しました」
 
 短く簡潔に、話し言葉で返してください。
@@ -287,23 +313,167 @@ Playerに対しては「手配します」「対応します」のように、�
         except Exception:
             return worker_response
 
-    def _generate_assignment_notification(self, worker_name: str, function_name: str, args: Dict) -> str:
-        """Playerに対してワーカーへの依頼内容を通知"""
+    def _generate_completion_summary(self, tool_calls) -> str:
+        """実行されたツールの内容をまとめた完了メッセージを生成"""
         try:
             client = self.client
 
-            notification_prompt = f"""
-あなたはsupply_managerです。{worker_name}に以下のタスクを依頼することになりました。
+            # ツール実行内容をまとめる
+            tasks_summary = []
+            for tool_call in tool_calls:
+                if tool_call.function.name in ["deliver_supplies", "procure_supplies"]:
+                    args = json.loads(tool_call.function.arguments or "{}")
 
-タスク: {function_name}
-引数: {args}
+                    if tool_call.function.name == "deliver_supplies":
+                        shelter = args.get("shelter_name", "避難所")
+                        item = args.get("item_name", "物資")
+                        quantity = args.get("quantity", 0)
+                        tasks_summary.append(f"{shelter}への{item}{quantity}")
+                    elif tool_call.function.name == "procure_supplies":
+                        item = args.get("item_name", "物資")
+                        quantity = args.get("quantity", 0)
+                        tasks_summary.append(f"{item}{quantity}の調達")
 
-Playerに対して、「{worker_name}に〇〇を頼みます」という形で、何をワーカーに依頼するかを伝える短いメッセージを作成してください。
-- ワーカー名は出さず「部下に」「担当者に」などで表現してください
-- 技術的な用語（deliver_supplies、procure_suppliesなど）は使わず、自然な日本語で
+            summary_prompt = f"""
+あなたはsupply_managerです。以下のタスクを完了しました。
+
+実行したタスク:
+{chr(10).join(f"- {task}" for task in tasks_summary)}
+
+Playerに対して、これらのタスクの手配が完了したことを報告する自然な会話メッセージを作成してください。
+- 「〜の手配が完了しました」「〜の配送手配が完了しました」のような形で
 - 簡潔で話し言葉で作成してください
 
-例：「部下に春日小学校への水の配送を依頼します」
+例：「春日小学校への水100本の配送手配が完了しました」
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": summary_prompt}]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception:
+            return "手配が完了しました。"
+
+    def _process_tool_loop(self, messages: List[Dict], initial_tool_results: List[Dict]) -> str:
+        """ループでツール呼び出しを処理（2回目以降対応）"""
+        # 最初のツール結果を会話履歴に追加
+        messages.append({
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [tr["tool_call"].model_dump() for tr in initial_tool_results]
+        })
+
+        for tr in initial_tool_results:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tr["tool_call"].id,
+                "name": tr["function_name"],
+                "content": tr["result"]
+            })
+
+        # ループでツール呼び出しを処理
+        max_iterations = 5  # 無限ループを防ぐため
+        iteration = 0
+
+        while iteration < max_iterations:
+            iteration += 1
+
+            # LLMに結果を解釈させ、必要に応じて追加ツールを実行
+            response = self.client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=messages,
+                tools=self.get_function_definitions(),
+                tool_choice="auto"
+            )
+
+            message = response.choices[0].message
+
+            # ツール呼び出しがない場合は終了
+            if not getattr(message, "tool_calls", None):
+                return message.content
+
+            # 実行系ツールがある場合は先にPlayerに一括通知
+            execution_tool_calls = [tc for tc in message.tool_calls
+                                   if tc.function.name in ["deliver_supplies", "procure_supplies"]]
+            if execution_tool_calls:
+                # 複数タスクをまとめた通知を生成してPlayerに先に送信
+                execution_tasks_preview = []
+                for tool_call in execution_tool_calls:
+                    args = json.loads(tool_call.function.arguments or "{}")
+                    execution_tasks_preview.append({
+                        "tool_call": tool_call,
+                        "function_name": tool_call.function.name,
+                        "result": ""  # まだ実行していないので空
+                    })
+
+                combined_notification = self._generate_combined_assignment_notification(execution_tasks_preview)
+                if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+                    self.manager.add_message("assistant", "supply_manager", combined_notification, "supply", from_person="supply_manager", to_person="Player")
+
+            # ツールを実行
+            tool_results = []
+            for tool_call in message.tool_calls:
+                fname = tool_call.function.name
+                args = json.loads(tool_call.function.arguments or "{}")
+
+                tool_result = self.create_tool_response(fname, args)
+                tool_results.append(tool_result)
+
+            # 実行系ツールがある場合は完了メッセージを返して終了
+            if any(tc.function.name in ["deliver_supplies", "procure_supplies"] for tc in message.tool_calls):
+                return self._generate_completion_summary(message.tool_calls)
+
+            # 確認系ツールの場合は会話履歴に追加して継続
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [tc.model_dump() for tc in message.tool_calls]
+            })
+
+            for i, tool_call in enumerate(message.tool_calls):
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "content": tool_results[i]
+                })
+
+        # 最大反復回数に達した場合
+        return "処理が完了しました。"
+
+    def _generate_combined_assignment_notification(self, execution_tasks: list) -> str:
+        """複数のタスクをまとめてPlayerに通知"""
+        try:
+            client = self.client
+
+            # 実行タスクの情報をまとめる
+            tasks_info = []
+            for task in execution_tasks:
+                tool_call = task["tool_call"]
+                args = json.loads(tool_call.function.arguments or "{}")
+
+                if tool_call.function.name == "deliver_supplies":
+                    shelter = args.get("shelter_name", "避難所")
+                    item = args.get("item_name", "物資")
+                    quantity = args.get("quantity", 0)
+                    tasks_info.append(f"{shelter}への{item}{quantity}")
+                elif tool_call.function.name == "procure_supplies":
+                    item = args.get("item_name", "物資")
+                    quantity = args.get("quantity", 0)
+                    tasks_info.append(f"{item}{quantity}の調達")
+
+            notification_prompt = f"""
+あなたはsupply_managerです。以下の複数のタスクを部下に依頼することになり、それをPlayerに報告することになりました。
+
+実行予定のタスク:
+{chr(10).join(f"- {task}" for task in tasks_info)}
+
+Playerに対して、これらの作業を今から実行することを報告する自然な返答を作成してください。
+- 「部下に〇〇と△△を依頼します」のような形で複数タスクをまとめて表現
+- 簡潔で話し言葉で作成してください
 """
 
             response = client.chat.completions.create(
@@ -314,15 +484,11 @@ Playerに対して、「{worker_name}に〇〇を頼みます」という形で�
             return response.choices[0].message.content
 
         except Exception:
-            if function_name == "deliver_supplies":
-                shelter = args.get("shelter_name", "避難所")
-                item = args.get("item_name", "物資")
-                return f"部下に{shelter}への{item}の配送を依頼します。"
-            elif function_name == "procure_supplies":
-                item = args.get("item_name", "物資")
-                return f"部下に{item}の調達を依頼します。"
+            # フォールバック
+            if len(execution_tasks) == 1:
+                return "部下に作業を依頼します。"
             else:
-                return f"部下に作業を依頼します。"
+                return f"部下に{len(execution_tasks)}件の作業を依頼します。"
 
     def _generate_task_instruction(self, worker_name: str, function_name: str, args: Dict) -> str:
         """マネージャーからワーカーへのタスク指示を生成"""
@@ -336,7 +502,7 @@ Playerに対して、「{worker_name}に〇〇を頼みます」という形で�
 引数: {args}
 
 {worker_name}に対して、自然な話し言葉でタスクを依頼する短いメッセージを作成してください。
-上司が部下に仕事を頼む感じで、丁寧で簡潔に。
+簡潔に。余計なリクエストはせずに。
 """
 
             response = client.chat.completions.create(
@@ -361,7 +527,7 @@ Playerに対して、「{worker_name}に〇〇を頼みます」という形で�
 引数: {args}
 
 上司に対して、タスクを承諾し、実施することを伝える短いメッセージを作成してください。
-部下が上司に返事をする感じで、簡潔に。
+部下が上司に返事をする感じで、短く簡潔に、話し言葉で。簡潔に。余計なリクエストはせずに。
 """
 
             response = client.chat.completions.create(
@@ -793,7 +959,7 @@ Playerに対して、これらのタスクが完了したことを報告する�
             "type": "function",
             "function": {
                 "name": "deliver_supplies",
-                "description": "避難所に物資を配送する。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
+                "description": "避難所に物資を配送する。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。このツールを実行した場合、Playerへの報告は関数内で自動的に行われるため、追加の会話応答は不要。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -842,7 +1008,7 @@ Playerに対して、これらのタスクが完了したことを報告する�
             "type": "function",
             "function": {
                 "name": "procure_supplies",
-                "description": "物資を調達して在庫に追加する。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
+                "description": "物資を調達して在庫に追加する。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。このツールを実行した場合、Playerへの報告は関数内で自動的に行われるため、追加の会話応答は不要。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -868,76 +1034,61 @@ Playerに対して、これらのタスクが完了したことを報告する�
 
         response_message = response.choices[0].message
 
-        # ツール呼び出しがあれば実行
+        # ツール呼び出しがあれば実行（複数対応）
         if getattr(response_message, "tool_calls", None):
-            tool_call = response_message.tool_calls[0]
-            fname = tool_call.function.name
-            args = json.loads(tool_call.function.arguments or "{}")
+            tool_results = []
+            combined_messages = []
 
-            if fname:
-                tool_result = self.create_tool_response(fname, args)
-
-                # 確認系（即座実行）の場合は、結果をLLMに渡して自然な会話にする
-                if fname in ["check_inventory", "show_inventory", "show_delivery_log"]:
-                    # ツール実行結果を会話履歴に追加してLLMに再度問い合わせ
-                    messages.append({
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [tool_call.model_dump()]
-                    })
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "name": fname,
-                        "content": tool_result
+            # 実行系ツールがある場合は先にPlayerに一括通知
+            execution_tool_calls = [tc for tc in response_message.tool_calls
+                                   if tc.function.name in ["deliver_supplies", "procure_supplies"]]
+            if execution_tool_calls:
+                # 複数タスクをまとめた通知を生成してPlayerに先に送信
+                execution_tasks_preview = []
+                for tool_call in execution_tool_calls:
+                    args = json.loads(tool_call.function.arguments or "{}")
+                    execution_tasks_preview.append({
+                        "tool_call": tool_call,
+                        "function_name": tool_call.function.name,
+                        "result": ""  # まだ実行していないので空
                     })
 
-                    # LLMに結果を解釈させ、必要に応じて追加ツールを実行
-                    second_response = self.client.chat.completions.create(
-                        model="gpt-5-mini",
-                        messages=messages,
-                        tools=self.get_function_definitions(),
-                        tool_choice="auto"
-                    )
+                combined_notification = self._generate_combined_assignment_notification(execution_tasks_preview)
+                if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+                    self.manager.add_message("assistant", "supply_manager", combined_notification, "supply", from_person="supply_manager", to_person="Player")
 
-                    second_message = second_response.choices[0].message
+            # 複数のツール呼び出しを順次処理
+            for tool_call in response_message.tool_calls:
+                fname = tool_call.function.name
+                args = json.loads(tool_call.function.arguments or "{}")
 
-                    # 2回目のレスポンスでもツール呼び出しがあれば実行
-                    if getattr(second_message, "tool_calls", None):
-                        second_tool_call = second_message.tool_calls[0]
-                        second_fname = second_tool_call.function.name
-                        second_args = json.loads(second_tool_call.function.arguments or "{}")
+                if fname:
+                    tool_result = self.create_tool_response(fname, args)
+                    tool_results.append({
+                        "tool_call": tool_call,
+                        "function_name": fname,
+                        "result": tool_result
+                    })
 
-                        # 追加ツールを実行
-                        second_tool_result = self.create_tool_response(second_fname, second_args)
+            # 複数のツール結果を処理
+            if tool_results:
+                # 確認系と実行系が混在する可能性があるため、適切に処理
+                has_confirmation_tools = any(tr["function_name"] in ["check_inventory", "show_inventory", "show_delivery_log"] for tr in tool_results)
+                has_execution_tools = any(tr["function_name"] in ["deliver_supplies", "procure_supplies"] for tr in tool_results)
 
-                        # 実行系ツールの場合はそのまま返す
-                        if second_fname in ["deliver_supplies", "procure_supplies"]:
-                            assistant_message = second_tool_result
-                        else:
-                            # その他の場合は通常通りLLMに解釈させる
-                            messages.append({
-                                "role": "assistant",
-                                "content": None,
-                                "tool_calls": [second_tool_call.model_dump()]
-                            })
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": second_tool_call.id,
-                                "name": second_fname,
-                                "content": second_tool_result
-                            })
+                if has_execution_tools:
+                    # 実行系ツールがある場合（Playerへの通知は既に送信済みのため、追加出力なし）
+                    execution_tasks = [tr for tr in tool_results if tr["function_name"] in ["deliver_supplies", "procure_supplies"]]
 
-                            final_response = self.client.chat.completions.create(
-                                model="gpt-5-mini",
-                                messages=messages
-                            )
-                            assistant_message = final_response.choices[0].message.content
-                    else:
-                        assistant_message = second_message.content
+                    # 実行系ツールの場合はPlayerに追加で何も返さない
+                    assistant_message = ""
+
+                elif has_confirmation_tools:
+                    # 確認系のみの場合は、ループでツール呼び出しを処理
+                    assistant_message = self._process_tool_loop(messages, tool_results)
                 else:
-                    # 実行系（2分待機）はそのまま返す
-                    assistant_message = tool_result
+                    # その他の場合
+                    assistant_message = "\n\n".join([tr["result"] for tr in tool_results])
             else:
                 assistant_message = "no_tool"
         else:

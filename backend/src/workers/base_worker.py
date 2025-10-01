@@ -35,7 +35,7 @@ class BaseWorker(ABC):
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
         self.task_end_time = current_time + timedelta(minutes=2)
 
-        return f"{task_description}を開始しました。{self.task_end_time.strftime('%H:%M')}頃に完了予定です。"
+        return f"{task_description}を開始しました。"
 
     def check_task_completion(self) -> bool:
         """タスクが完了したかチェック"""
