@@ -193,6 +193,12 @@ class SupplyWorker(BaseWorker):
         if hasattr(self.manager, 'manager') and hasattr(self.manager.manager, 'add_message'):
             self.manager.manager.add_message("user", self.worker_name, worker_report, "supply", from_person=self.worker_name, to_person="supply_manager")
 
+        # マネージャーから感謝メッセージを生成して追加
+        if hasattr(self.manager, '_generate_thank_you_message'):
+            thank_you_message = self.manager._generate_thank_you_message(self.worker_name, self.current_task)
+            if hasattr(self.manager, 'manager') and hasattr(self.manager.manager, 'add_message'):
+                self.manager.manager.add_message("assistant", "supply_manager", thank_you_message, "supply", from_person="supply_manager", to_person=self.worker_name)
+
         # タスク状態をリセット
         self.is_busy = False
         current_task = self.current_task

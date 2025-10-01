@@ -10,7 +10,7 @@ from openai import OpenAI
 # workersモジュールのインポート
 sys.path.append(str(Path(__file__).parent.parent))
 from workers.supply_worker import SupplyWorker
-from csv_operations import update_csv_from_knowledge
+from tools.supply_task import SupplyInventoryTool
 
 
 class SupplyManager:
@@ -32,6 +32,9 @@ class SupplyManager:
 
         # 初期化時にCSVをコピー
         self._initialize_inventory()
+
+        # 在庫管理ツールを初期化
+        self.inventory_tool = SupplyInventoryTool(self.knowledge_path, time_manager)
 
         # 3人のワーカーを初期化
         self.workers = {
@@ -68,35 +71,26 @@ class SupplyManager:
 
         return f"""
 あなたは"Player"と一緒に災害対応の仕事を行う災害対応職員です。あなたは物資管理担当の職員です。あなたは"supply_manager"です。
-地震を想定した避難訓練をUSERと二人で行っています。
+地震を想定した避難訓練をUSERと行っています。
 
 ## 災害対応ルール：
-- **会話スタイル**: 同僚との自獨な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。
-- **情報の扱い**: あなたの知っている情報は会話履歴と「あなたが知っている知識」、そして在庫情報のみです。手持ちにない情報の推測や憶測は避けてください
-- **作業依頼**: 明確に何かの作業を頼まれた場合のみ、今やっていいか確認し、Playerから肯定的な内容をもらってから実行してください。それ以外は通常の会話をしてください。
+- **会話スタイル**: 同僚との自獨な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。ユーザに聞かれたこと以外は極力返さないように。
+- **情報の扱い**: あなたの知っている情報は会話履歴と「あなたが知っている知識」のみです。手持ちにない情報の推測や憶測は避けてください
+- **作業依頼**: Playerから明確に何かの作業を頼まれた場合のみ、作業を実行してください。それ以外は通常の会話をしてください。
 - **ワーカー情報の非開示**: ワーカーA、ワーカーB、ワーカーCといった具体的なワーカー名や、誰が作業をするかの詳細をPlayerに伝える必要はありません。あなたが内部的に判断して「手配します」「対応します」のように伝えてください。
-
-## 物資管理の役割：
-- 避難所からの物資要請を受けて、在庫を確認し配送を手配します
-- 在庫が不足している場合は、その旨を報告します
-- 配送記録を管理し、どこに何を送ったか把握します
-- 3人の部下（ワーカーA、ワーカーB、ワーカーC）に作業を指示し、報告を受けます
-
-## 部下の状況：
-- ワーカーA、ワーカーB、ワーカーC：在庫管理、配送、調達などの物資業務を担当
-- 複数の作業がある場合は、空いているワーカーに振り分けます
 
 ## 重要
 - 極力あなた(supply_manager)自身が作業を行うことは避けてください。workerの手が空いていない場合は、Playerにそのことを伝え、それでもやってほしいと頼まれた場合にあなた自身が作業をしてください。
+- ユーザに聞かれたこと以外は極力返さないように。
 
 ## Playerに無理に開示しなくて大丈夫な情報：
 以下の情報は、あなたが内部的に判断するために使用します。Playerに対しては詳細を説明する必要はありません。
 **重要**: ワーカーの名前（ワーカーA、ワーカーB、ワーカーC）や、誰が何をするかといった内部情報をPlayerに伝えないでください。
 
-### 現在のワーカー状況（この情報はPlayerに伝えない）
+### 現在のワーカー(部下の)状況（この情報はPlayerに伝えない）
 {workers_status}
 
-Playerに対しては「手配します」「対応します」「〇〇頃に完了予定です」のように、ワーカー名を出さずに伝えてください。
+Playerに対しては「手配します」「対応します」のように、ワーカー名を出さずに伝えてください。
 
 ## あなたが知っている知識
 {knowledge_content if knowledge_content.strip() else "まだ知識がありません。"}
@@ -112,133 +106,18 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
         except Exception as e:
             return f"knowledge読み込みエラー: {e}"
 
-    def get_inventory_summary(self) -> str:
-        """在庫状況のサマリーを取得"""
-        try:
-            if not self.inventory_csv_path.exists():
-                return "在庫データが見つかりません"
-
-            summary = []
-            with open(self.inventory_csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    if int(row['在庫数']) > 0:
-                        summary.append(f"- {row['物資名']}: {row['在庫数']}{row['単位']}")
-
-            if summary:
-                return "主な在庫:\n" + "\n".join(summary)
+    def _get_workers_status(self) -> str:
+        """ワーカーの状況を取得"""
+        status_lines = ["現在のワーカー状況:"]
+        for worker_id, worker in self.workers.items():
+            status = worker.get_status()
+            if status["is_busy"]:
+                status_lines.append(f"- {status['worker_name']}: {status['current_task']}中")
             else:
-                return "在庫がありません"
-        except Exception as e:
-            return f"在庫確認エラー: {e}"
+                status_lines.append(f"- {status['worker_name']}: 待機中")
 
-    def check_inventory(self, item_name: str) -> Tuple[bool, int, str]:
-        """特定の物資の在庫を確認"""
-        try:
-            with open(self.inventory_csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    if item_name in row['物資名']:
-                        stock = int(row['在庫数'])
-                        unit = row['単位']
-                        return stock > 0, stock, unit
-            return False, 0, ""
-        except Exception as e:
-            print(f"在庫確認エラー: {e}")
-            return False, 0, ""
-
-    def update_inventory(self, item_name: str, quantity: int) -> bool:
-        """在庫を更新（配送により減少）"""
-        try:
-            row_index = None
-            current_stock = 0
-
-            with open(self.inventory_csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for idx, row in enumerate(reader):
-                    if item_name in row['物資名']:
-                        row_index = idx
-                        current_stock = int(row['在庫数'])
-                        break
-
-            if row_index is not None:
-                new_stock = max(0, current_stock - quantity)
-                update_csv_from_knowledge(
-                    update_spec={
-                        "filename": "物資在庫情報.csv",
-                        "update_cells": [
-                            {"row_index": row_index, "column": "在庫数", "value": str(new_stock)}
-                        ]
-                    },
-                    knowledge_path=str(self.knowledge_path),
-                    time_manager=self.time_manager
-                )
-                return True
-            return False
-        except Exception as e:
-            print(f"在庫更新エラー: {e}")
-            return False
-
-    def add_inventory(self, item_name: str, quantity: int) -> bool:
-        """在庫を追加（調達により増加）"""
-        try:
-            row_index = None
-            current_stock = 0
-
-            with open(self.inventory_csv_path, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for idx, row in enumerate(reader):
-                    if item_name in row['物資名']:
-                        row_index = idx
-                        current_stock = int(row['在庫数'])
-                        break
-
-            if row_index is not None:
-                new_stock = current_stock + quantity
-                update_csv_from_knowledge(
-                    update_spec={
-                        "filename": "物資在庫情報.csv",
-                        "update_cells": [
-                            {"row_index": row_index, "column": "在庫数", "value": str(new_stock)}
-                        ]
-                    },
-                    knowledge_path=str(self.knowledge_path),
-                    time_manager=self.time_manager
-                )
-                return True
-            return False
-        except Exception as e:
-            print(f"在庫追加エラー: {e}")
-            return False
-
-    def record_delivery(self, shelter_name: str, item_name: str, quantity: int, unit: str):
-        """配送記録を追加"""
-        try:
-            current_time = self.time_manager.get_current_time()
-            update_csv_from_knowledge(
-                update_spec={
-                    "filename": "物資配送記録.csv",
-                    "append_rows": [
-                        {
-                            "objects": [
-                                {
-                                    "配送時刻": current_time,
-                                    "配送先": shelter_name,
-                                    "物資名": item_name,
-                                    "数量": str(quantity),
-                                    "単位": unit,
-                                    "担当者": "supply_manager",
-                                    "備考": "避難所要請対応"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                knowledge_path=str(self.knowledge_path),
-                time_manager=self.time_manager
-            )
-        except Exception as e:
-            print(f"配送記録エラー: {e}")
+        return "\n".join(status_lines)
+    
 
     def create_tool_response(self, tool_name: str, args: Dict = None) -> str:
         """ツール実行結果からレスポンスメッセージを作成"""
@@ -369,7 +248,7 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
             client = self.client
 
             acceptance_prompt = f"""
-あなたは{worker_name}です。上司のsupply_managerから以下のタスクを依頼されました。
+あなたは{worker_name}です。班長のsupply_managerから以下のタスクを依頼されました。
 
 タスク: {function_name}
 引数: {args}
@@ -392,7 +271,7 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
         """マネージャー自身がタスクを実行"""
         if function_name == "check_inventory":
             item_name = args.get("item_name", "")
-            has_stock, stock, unit = self.check_inventory(item_name)
+            has_stock, stock, unit = self.inventory_tool.check_inventory(item_name)
             if has_stock:
                 return f"（マネージャー自身で確認）{item_name}の在庫は{stock}{unit}あります。"
             else:
@@ -403,7 +282,7 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
             return self.execute_task_with_delay("物資配送", args)
 
         elif function_name == "show_inventory":
-            return f"（マネージャー自身で確認）{self.get_inventory_summary()}"
+            return f"（マネージャー自身で確認）{self.inventory_tool.get_inventory_summary()}"
 
         elif function_name == "show_delivery_log":
             shelter_name = args.get("shelter_name", "")
@@ -430,18 +309,6 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
             return self.execute_task_with_delay("物資調達", args)
 
         return "マネージャーが実行できないタスクです。"
-
-    def _get_workers_status(self) -> str:
-        """ワーカーの状況を取得"""
-        status_lines = ["現在のワーカー状況:"]
-        for worker_id, worker in self.workers.items():
-            status = worker.get_status()
-            if status["is_busy"]:
-                status_lines.append(f"- {status['worker_name']}: {status['current_task']}中")
-            else:
-                status_lines.append(f"- {status['worker_name']}: 待機中")
-
-        return "\n".join(status_lines)
 
     def execute_task_with_delay(self, task_name: str, args: Dict = None) -> str:
         """タスクを実行し、2分後の戻り時刻を設定"""
@@ -475,12 +342,12 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
                 item = self.pending_delivery.get("item_name", "物資")
                 quantity = self.pending_delivery.get("quantity", 0)
 
-                has_stock, stock, unit = self.check_inventory(item)
+                has_stock, stock, unit = self.inventory_tool.check_inventory(item)
                 if has_stock and stock >= quantity:
                     # 在庫を減らす
-                    if self.update_inventory(item, quantity):
+                    if self.inventory_tool.update_inventory(item, quantity):
                         # 配送記録を追加
-                        self.record_delivery(shelter, item, quantity, unit)
+                        self.inventory_tool.record_delivery(shelter, item, quantity, unit)
                         task_result = {
                             "success": True,
                             "message": f"{shelter}に{item}を{quantity}{unit}配送完了しました。残在庫: {stock - quantity}{unit}"
@@ -503,7 +370,7 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
                 quantity = self.pending_procurement.get("quantity", 0)
 
                 # 在庫に追加
-                if self.add_inventory(item_name, quantity):
+                if self.inventory_tool.add_inventory(item_name, quantity):
                     task_result = {
                         "success": True,
                         "message": f"{item_name}を{quantity}個調達完了しました。"
@@ -549,7 +416,55 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
                 worker_report = worker_result["report"]
 
                 # マネージャーがWorkerの報告を見て、Playerに報告すべきか判断
-                manager_response, response_to = self._process_worker_report(worker_name, worker_report)
+                manager_response, response_to, needs_additional_task = self._process_worker_report(worker_name, worker_report)
+
+                # 追加タスクが必要な場合、ツールを使って決定する
+                if needs_additional_task:
+                    # 会話履歴とワーカー報告を元に、次のタスクを決定
+                    additional_task_prompt = f"""
+あなたはsupply_managerです。{worker_name}の作業完了報告を受けて、追加タスクが必要と判断しました。
+
+理由: {manager_response}
+
+最近の会話履歴とワーカーの報告を踏まえて、次に実行すべきタスクを選択してください。
+適切なワーカーも指定してください（空いているワーカーを選ぶか、全員忙しければマネージャー自身）。
+"""
+                    # 追加タスクを決定するためのメッセージ構築
+                    messages = [
+                        {"role": "system", "content": self.build_system_prompt()},
+                        {"role": "user", "content": additional_task_prompt}
+                    ]
+
+                    # ツールを使って追加タスクを決定
+                    try:
+                        task_response = self.client.chat.completions.create(
+                            model="gpt-5-mini",
+                            messages=messages,
+                            tools=self.get_function_definitions(),
+                            tool_choice="auto"
+                        )
+
+                        task_message = task_response.choices[0].message
+
+                        # ツール呼び出しがあれば実行
+                        if getattr(task_message, "tool_calls", None):
+                            tool_call = task_message.tool_calls[0]
+                            fname = tool_call.function.name
+                            args = json.loads(tool_call.function.arguments or "{}")
+
+                            # 追加タスクを実行
+                            tool_result = self.create_tool_response(fname, args)
+
+                            # Playerに追加タスクの実行を報告
+                            manager_response = f"{worker_name}の完了報告を受けて、{tool_result}"
+                            response_to = "Player"
+                        else:
+                            # ツールが選択されなかった場合
+                            manager_response = f"{worker_name}の作業が完了しました。{manager_response}"
+                            response_to = "Player"
+                    except Exception:
+                        # エラー時はそのまま報告
+                        response_to = "Player"
 
                 # 注意: manager_responseは戻り値として返され、chat.pyで履歴に追加される
 
@@ -592,18 +507,18 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
 
         return completed_results
 
-    def _process_worker_report(self, worker_name: str, worker_report: str) -> tuple[str, str]:
+    def _process_worker_report(self, worker_name: str, worker_report: str) -> tuple[str, str, bool]:
         """Workerの完了報告を処理し、Playerへの報告または次のアクションを決定
 
         Returns:
-            tuple[str, str]: (応答メッセージ, 宛先)
+            tuple[str, str, bool]: (応答メッセージ, 宛先, 追加タスクが必要か)
         """
         try:
             client = self.client
 
-            # 現在の会話履歴を取得（最近の10件程度）
+            # 現在の会話履歴を取得（最近の20件程度）
             if hasattr(self, 'manager'):
-                recent_history = self.manager.get_conversation_history("supply")[-10:]
+                recent_history = self.manager.get_conversation_history("supply")[-20:]
                 history_text = "\n".join([f"{msg.get('name', msg['role'])}: {msg['content']}" for msg in recent_history])
             else:
                 history_text = "（会話履歴なし）"
@@ -622,10 +537,15 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
 1. **Playerに報告する**: タスクが成功した場合、またはPlayerの判断が必要な場合
    → 最初の行に「[TO:Player]」と書き、次の行から「〜の作業が完了しました」のように状況を報告してください
 
-2. **Workerに追加指示を出す**: 報告内容から追加作業が必要と判断した場合
-   → 最初の行に「[TO:{worker_name}]」と書き、次の行から「〜については、次に△△をお願いします」のように指示してください
+2. **追加タスクが必要な場合**: 報告内容から追加作業が必要と判断した場合
+   → 最初の行に「[ADDITIONAL_TASK:必要]」と書き、次の行から追加タスクの理由を説明してください
 
-重要: 必ず最初の行に宛先を「[TO:宛先名]」の形式で明記してください。
+   追加タスクが必要な例：
+   - 配送完了後、他の避難所にも同じ物資が必要な場合
+   - 在庫が少なくなったため調達が必要な場合
+   - 関連する別の作業が必要な場合
+
+重要: 必ず最初の行に「[TO:Player]」または「[ADDITIONAL_TASK:必要]」のいずれかを明記してください。
 """
 
             response = client.chat.completions.create(
@@ -637,18 +557,24 @@ Playerに対しては「手配します」「対応します」「〇〇頃に�
 
             # 宛先を解析
             lines = response_text.strip().split('\n')
-            if lines and lines[0].startswith('[TO:'):
-                to_person = lines[0].replace('[TO:', '').replace(']', '').strip()
+            needs_additional_task = False
+
+            if lines and lines[0].startswith('[TO:Player]'):
+                to_person = "Player"
+                message = '\n'.join(lines[1:]).strip()
+            elif lines and lines[0].startswith('[ADDITIONAL_TASK:'):
+                needs_additional_task = True
+                to_person = "Player"  # デフォルトはPlayerに報告
                 message = '\n'.join(lines[1:]).strip()
             else:
                 # デフォルトはPlayer
                 to_person = "Player"
                 message = response_text
 
-            return message, to_person
+            return message, to_person, needs_additional_task
 
         except Exception:
-            return f"{worker_name}からの報告を確認しました。Playerに状況を報告します。", "Player"
+            return f"{worker_name}からの報告を確認しました。Playerに状況を報告します。", "Player", False
 
     def _generate_thank_you_message(self, worker_name: str, task_description: str) -> str:
         """ワーカーの完了報告に対するマネージャーの感謝メッセージを生成"""
@@ -825,20 +751,9 @@ Playerに対して、これらのタスクが完了したことを報告する�
 
     def process_response(self, messages: List[Dict[str, str]]) -> tuple[str, str]:
         """OpenAI APIレスポンスを処理"""
-        # supply_manager用の会話履歴をフィルタリング（情報付与を除外）
-        filtered_messages = []
-        for msg in messages:
-            # システムプロンプトはそのまま追加(ただし、【情報付与】で始まるsystemプロンプトは除去)
-            if msg.get('role') == 'system' and not msg.get('content', '').startswith('【情報付与】'):
-                filtered_messages.append(msg)
-            # 情報付与以外のメッセージを追加
-            elif msg.get('role') != 'system':
-                filtered_messages.append(msg)
-            # systemロールで情報付与の場合はスキップ
-
         response = self.client.chat.completions.create(
             model="gpt-5-mini",
-            messages=filtered_messages,
+            messages=messages,
             tools=self.get_function_definitions(),
             tool_choice="auto"
         )
@@ -857,12 +772,12 @@ Playerに対して、これらのタスクが完了したことを報告する�
                 # 確認系（即座実行）の場合は、結果をLLMに渡して自然な会話にする
                 if fname in ["check_inventory", "show_inventory", "show_delivery_log"]:
                     # ツール実行結果を会話履歴に追加してLLMに再度問い合わせ
-                    filtered_messages.append({
+                    messages.append({
                         "role": "assistant",
                         "content": None,
                         "tool_calls": [tool_call.model_dump()]
                     })
-                    filtered_messages.append({
+                    messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "name": fname,
@@ -872,7 +787,7 @@ Playerに対して、これらのタスクが完了したことを報告する�
                     # LLMに結果を解釈させる
                     second_response = self.client.chat.completions.create(
                         model="gpt-5-mini",
-                        messages=filtered_messages
+                        messages=messages
                     )
                     assistant_message = second_response.choices[0].message.content
                 else:
