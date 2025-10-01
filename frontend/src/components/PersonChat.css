@@ -54,7 +54,7 @@
 }
 
 .message-item.system {
-  align-self: center;
+  align-self: flex-start;
   background: #fff3e0;
   color: #e65100;
   border: 1px solid #ffb74d;
