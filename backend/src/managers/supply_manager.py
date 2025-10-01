@@ -61,7 +61,7 @@ class SupplyManager:
             self.delivery_log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.delivery_log_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['配送日時', '避難所名', '物資名', '数量', '単位', '担当者', '備考'])
+                writer.writerow(['避難所名', '物資名', '数量', '単位', '備考'])
             print(f"物資配送記録.csvを作成しました")
 
     def build_system_prompt(self) -> str:
@@ -291,14 +291,14 @@ Playerに対しては「手配します」「対応します」のように、�
                 with open(self.delivery_log_path, 'r', encoding='utf-8') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        if not shelter_name or shelter_name in row.get('配送先', ''):
-                            logs.append(f"{row.get('配送時刻', '')} - {row.get('配送先', '')}: {row.get('物資名', '')} {row.get('数量', '')}{row.get('単位', '')}")
+                        if not shelter_name or shelter_name in row.get('避難所名', ''):
+                            logs.append(f"{row.get('避難所名', '')}: {row.get('物資名', '')} {row.get('数量', '')}{row.get('単位', '')}")
 
                 if logs:
                     if shelter_name:
                         return f"（マネージャー自身で確認）{shelter_name}への配送記録:\n" + "\n".join(logs[-10:])
                     else:
-                        return f"（マネージャー自身で確認）最近の配送記録:\n" + "\n".join(logs[-10:])
+                        return f"（マネージャー自身で確認）配送記録:\n" + "\n".join(logs[-10:])
                 else:
                     return f"（マネージャー自身で確認）配送記録が見つかりません。"
             except Exception:
@@ -576,15 +576,16 @@ Playerに対しては「手配します」「対応します」のように、�
         except Exception:
             return f"{worker_name}からの報告を確認しました。Playerに状況を報告します。", "Player", False
 
-    def _generate_thank_you_message(self, worker_name: str, task_description: str) -> str:
+    def _generate_thank_you_message(self, worker_name: str, worker_report: str) -> str:
         """ワーカーの完了報告に対するマネージャーの感謝メッセージを生成"""
         try:
             client = self.client
 
             thank_you_prompt = f"""
-あなたはsupply_managerです。{worker_name}から以下のタスクの完了報告を受けました。
+あなたはsupply_managerです。{worker_name}から以下の完了報告を受けました。
 
-完了したタスク: {task_description}
+ワーカーからの報告:
+{worker_report}
 
 {worker_name}に対して、感謝の気持ちを表す短いメッセージを作成してください。
 上司が部下の報告に対して返事をする感じで、簡潔に「ありがとう」的な内容を。

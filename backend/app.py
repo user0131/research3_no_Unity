@@ -365,10 +365,13 @@ def get_manager_debug_data():
             # Workerの情報
             try:
                 if hasattr(chat.supply_manager, 'workers'):
-                    for worker in chat.supply_manager.workers:
+                    for worker_name, worker in chat.supply_manager.workers.items():
                         worker_info = {
+                            "name": worker_name,
                             "type": type(worker).__name__,
-                            "available": worker.is_available() if hasattr(worker, 'is_available') else True
+                            "available": worker.is_available() if hasattr(worker, 'is_available') else True,
+                            "is_busy": getattr(worker, 'is_busy', False),
+                            "current_task": getattr(worker, 'current_task', None)
                         }
                         supply_data["workers"].append(worker_info)
             except Exception as worker_error:

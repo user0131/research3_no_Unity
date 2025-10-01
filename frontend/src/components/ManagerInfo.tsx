@@ -221,7 +221,7 @@ const ManagerInfo: React.FC<ManagerInfoProps> = ({ managerType }) => {
             <div className="section-content">
               {managerData.workers.map((worker, index) => (
                 <div key={index} className="info-row">
-                  <span className="info-label">{worker.type}:</span>
+                  <span className="info-label">{worker.name || worker.type}:</span>
                   <span className={`info-value ${worker.available ? 'available' : 'unavailable'}`}>
                     {worker.available ? '利用可能' : '使用中'}
                   </span>

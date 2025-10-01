@@ -118,7 +118,6 @@ class SupplyInventoryTool:
     def record_delivery(self, shelter_name: str, item_name: str, quantity: int, unit: str):
         """配送記録を追加"""
         try:
-            current_time = self.time_manager.get_current_time()
             update_csv_from_knowledge(
                 update_spec={
                     "filename": "物資配送記録.csv",
@@ -126,12 +125,10 @@ class SupplyInventoryTool:
                         {
                             "objects": [
                                 {
-                                    "配送時刻": current_time,
-                                    "配送先": shelter_name,
+                                    "避難所名": shelter_name,
                                     "物資名": item_name,
                                     "数量": str(quantity),
                                     "単位": unit,
-                                    "担当者": "supply_manager",
                                     "備考": "避難所要請対応"
                                 }
                             ]

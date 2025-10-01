@@ -90,7 +90,6 @@ class SupplyWorker(BaseWorker):
                 )
 
             # 配送記録を追加
-            current_time = self.time_manager.get_current_time()
             update_csv_from_knowledge(
                 update_spec={
                     "filename": "物資配送記録.csv",
@@ -98,12 +97,10 @@ class SupplyWorker(BaseWorker):
                         {
                             "objects": [
                                 {
-                                    "配送時刻": current_time,
-                                    "配送先": shelter_name,
+                                    "避難所名": shelter_name,
                                     "物資名": item_name,
                                     "数量": str(quantity),
                                     "単位": unit,
-                                    "担当者": self.worker_name,
                                     "備考": "避難所要請対応"
                                 }
                             ]
@@ -118,7 +115,6 @@ class SupplyWorker(BaseWorker):
                 "success": True,
                 "message": f"{shelter_name}への{item_name} {quantity}{unit}の配送を完了し、在庫を更新しました",
                 "delivery_details": {
-                    "time": current_time,
                     "shelter": shelter_name,
                     "item": item_name,
                     "quantity": quantity,
@@ -195,7 +191,7 @@ class SupplyWorker(BaseWorker):
 
         # マネージャーから感謝メッセージを生成して追加
         if hasattr(self.manager, '_generate_thank_you_message'):
-            thank_you_message = self.manager._generate_thank_you_message(self.worker_name, self.current_task)
+            thank_you_message = self.manager._generate_thank_you_message(self.worker_name, worker_report)
             if hasattr(self.manager, 'manager') and hasattr(self.manager.manager, 'add_message'):
                 self.manager.manager.add_message("assistant", "supply_manager", thank_you_message, "supply", from_person="supply_manager", to_person=self.worker_name)
 

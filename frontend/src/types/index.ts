@@ -41,8 +41,11 @@ export interface ManagerDebugData { // 記憶の表示する型を設定して�
     deliveries?: any[];
   };
   workers: Array<{
+    name: string;
     type: string;
     available: boolean;
+    is_busy?: boolean;
+    current_task?: string | null;
   }>;
 }
 
