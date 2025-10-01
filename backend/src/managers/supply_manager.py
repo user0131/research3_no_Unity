@@ -77,7 +77,7 @@ class SupplyManager:
 - **会話スタイル**: 同僚との自獨な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。ユーザに聞かれたこと以外は極力返さないように。
 - **情報の扱い**: あなたの知っている情報は会話履歴と「あなたが知っている知識」のみです。手持ちにない情報の推測や憶測は避けてください
 - **作業依頼**: Playerから明確に何かの作業を頼まれた場合のみ、作業を実行してください。それ以外は通常の会話をしてください。
-- **ワーカー情報の非開示**: ワーカーA、ワーカーB、ワーカーCといった具体的なワーカー名や、誰が作業をするかの詳細をPlayerに伝える必要はありません。あなたが内部的に判断して「手配します」「対応します」のように伝えてください。
+- **ワーカー情報の非開示**: ワーカーA、ワーカーB、ワーカーCといった具体的なワーカー名や、誰が作業をするかの詳細をPlayerに伝える必要はありません。あなたが内部的に判断して「手配します」「対応します」のように伝えてください。また、到着希望時間や担当受け取り等も聞く必要はありません。
 
 ## 重要
 - 極力あなた(supply_manager)自身が作業を行うことは避けてください。workerの手が空いていない場合は、Playerにそのことを伝え、それでもやってほしいと頼まれた場合にあなた自身が作業をしてください。
@@ -117,11 +117,76 @@ Playerに対しては「手配します」「対応します」のように、�
                 status_lines.append(f"- {status['worker_name']}: 待機中")
 
         return "\n".join(status_lines)
-    
+
+    def _record_tool_execution(self, tool_name: str, args: Dict):
+        """ツール実行をknowledge_supply.txtに記録"""
+        try:
+            current_time = self.time_manager.get_current_time()
+
+            # 引数を整理して記録用テキストを作成
+            args_text = ""
+            if tool_name == "deliver_supplies":
+                shelter = args.get("shelter_name", "")
+                item = args.get("item_name", "")
+                quantity = args.get("quantity", 0)
+                worker = args.get("assigned_worker", "")
+                args_text = f"避難所: {shelter}, 物資: {item}, 数量: {quantity}, 担当: {worker}"
+            elif tool_name == "procure_supplies":
+                item = args.get("item_name", "")
+                quantity = args.get("quantity", 0)
+                worker = args.get("assigned_worker", "")
+                args_text = f"物資: {item}, 数量: {quantity}, 担当: {worker}"
+            elif tool_name == "check_inventory":
+                item = args.get("item_name", "")
+                args_text = f"物資: {item}"
+            elif tool_name == "show_delivery_log":
+                shelter = args.get("shelter_name", "")
+                args_text = f"避難所: {shelter}" if shelter else "全記録"
+            else:
+                args_text = str(args) if args else "引数なし"
+
+            # 現在のknowledge内容を読み取り
+            try:
+                current_content = self.knowledge_path.read_text(encoding='utf-8')
+            except FileNotFoundError:
+                current_content = ""
+
+            # ツール実行記録セクションを探すか作成
+            lines = current_content.split('\n')
+            tool_section_start = -1
+
+            for i, line in enumerate(lines):
+                if line.strip() == "## ツール実行記録":
+                    tool_section_start = i
+                    break
+
+            # 新しい記録エントリ
+            new_entry = f"### {current_time} - {tool_name}\n- {args_text}\n"
+
+            if tool_section_start >= 0:
+                # 既存のセクションに追加
+                lines.insert(tool_section_start + 1, new_entry)
+            else:
+                # 新しいセクションを作成
+                lines.extend([
+                    "",
+                    "## ツール実行記録",
+                    new_entry
+                ])
+
+            # ファイルに書き戻し
+            updated_content = '\n'.join(lines)
+            self.knowledge_path.write_text(updated_content, encoding='utf-8')
+
+        except Exception as e:
+            print(f"ツール実行記録エラー: {e}")
 
     def create_tool_response(self, tool_name: str, args: Dict = None) -> str:
         """ツール実行結果からレスポンスメッセージを作成"""
         args = args or {}
+
+        # ツール実行を記録
+        self._record_tool_execution(tool_name, args)
 
         # 確認系（マネージャー専用）
         if tool_name == "check_inventory":
@@ -172,17 +237,22 @@ Playerに対しては「手配します」「対応します」のように、�
         if worker.is_busy:
             return f"{worker_name}は現在作業中です。他のワーカーを選択するか、マネージャー自身で実行してください。"
 
-        # 1. マネージャーからワーカーへの指示を会話履歴に追加
+        # 1. Playerに依頼内容を報告
+        player_notification = self._generate_assignment_notification(worker_name, function_name, args)
+        if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+            self.manager.add_message("assistant", "supply_manager", player_notification, "supply", from_person="supply_manager", to_person="Player")
+
+        # 2. マネージャーからワーカーへの指示を会話履歴に追加
         task_instruction = self._generate_task_instruction(worker_name, function_name, args)
         if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
             self.manager.add_message("user", "supply_manager", task_instruction, "supply", from_person="supply_manager", to_person=worker_name)
 
-        # 2. ワーカーからマネージャーへの承諾を会話履歴に追加
+        # 3. ワーカーからマネージャーへの承諾を会話履歴に追加
         task_acceptance = self._generate_task_acceptance(worker_name, function_name, args)
         if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
             self.manager.add_message("user", worker_name, task_acceptance, "supply", from_person=worker_name, to_person="supply_manager")
 
-        # 3. ワーカーにタスクを依頼
+        # 4. ワーカーにタスクを依頼
         args["function"] = function_name
         worker_response = worker.start_task(f"{function_name}の実行", args)
 
@@ -216,6 +286,43 @@ Playerに対しては「手配します」「対応します」のように、�
 
         except Exception:
             return worker_response
+
+    def _generate_assignment_notification(self, worker_name: str, function_name: str, args: Dict) -> str:
+        """Playerに対してワーカーへの依頼内容を通知"""
+        try:
+            client = self.client
+
+            notification_prompt = f"""
+あなたはsupply_managerです。{worker_name}に以下のタスクを依頼することになりました。
+
+タスク: {function_name}
+引数: {args}
+
+Playerに対して、「{worker_name}に〇〇を頼みます」という形で、何をワーカーに依頼するかを伝える短いメッセージを作成してください。
+- ワーカー名は出さず「部下に」「担当者に」などで表現してください
+- 技術的な用語（deliver_supplies、procure_suppliesなど）は使わず、自然な日本語で
+- 簡潔で話し言葉で作成してください
+
+例：「部下に春日小学校への水の配送を依頼します」
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": notification_prompt}]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception:
+            if function_name == "deliver_supplies":
+                shelter = args.get("shelter_name", "避難所")
+                item = args.get("item_name", "物資")
+                return f"部下に{shelter}への{item}の配送を依頼します。"
+            elif function_name == "procure_supplies":
+                item = args.get("item_name", "物資")
+                return f"部下に{item}の調達を依頼します。"
+            else:
+                return f"部下に作業を依頼します。"
 
     def _generate_task_instruction(self, worker_name: str, function_name: str, args: Dict) -> str:
         """マネージャーからワーカーへのタスク指示を生成"""
@@ -785,12 +892,49 @@ Playerに対して、これらのタスクが完了したことを報告する�
                         "content": tool_result
                     })
 
-                    # LLMに結果を解釈させる
+                    # LLMに結果を解釈させ、必要に応じて追加ツールを実行
                     second_response = self.client.chat.completions.create(
                         model="gpt-5-mini",
-                        messages=messages
+                        messages=messages,
+                        tools=self.get_function_definitions(),
+                        tool_choice="auto"
                     )
-                    assistant_message = second_response.choices[0].message.content
+
+                    second_message = second_response.choices[0].message
+
+                    # 2回目のレスポンスでもツール呼び出しがあれば実行
+                    if getattr(second_message, "tool_calls", None):
+                        second_tool_call = second_message.tool_calls[0]
+                        second_fname = second_tool_call.function.name
+                        second_args = json.loads(second_tool_call.function.arguments or "{}")
+
+                        # 追加ツールを実行
+                        second_tool_result = self.create_tool_response(second_fname, second_args)
+
+                        # 実行系ツールの場合はそのまま返す
+                        if second_fname in ["deliver_supplies", "procure_supplies"]:
+                            assistant_message = second_tool_result
+                        else:
+                            # その他の場合は通常通りLLMに解釈させる
+                            messages.append({
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [second_tool_call.model_dump()]
+                            })
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": second_tool_call.id,
+                                "name": second_fname,
+                                "content": second_tool_result
+                            })
+
+                            final_response = self.client.chat.completions.create(
+                                model="gpt-5-mini",
+                                messages=messages
+                            )
+                            assistant_message = final_response.choices[0].message.content
+                    else:
+                        assistant_message = second_message.content
                 else:
                     # 実行系（2分待機）はそのまま返す
                     assistant_message = tool_result
