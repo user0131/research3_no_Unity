@@ -1,9 +1,10 @@
 # Dependencies
 node_modules/
 backend/.venv/
-
 # Python cache files
 __pycache__/
+*.pyc
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
