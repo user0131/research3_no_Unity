@@ -25,6 +25,6 @@ http://localhost:3000/
 
 TODO 実行中に会話ができないようにする。
 
-TODO 各々のworkerができるタスクをちゃんと定義しよう。
+TODO 各々のworkerができるタスクをちゃんと定義しよう。knowledgeの初期化に追加しておく。
 
 TODO ワーカー情報が反映されるように。
