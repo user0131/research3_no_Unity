@@ -4,7 +4,7 @@ import { ManagerDebugData, Message } from '../types'; // 型設定
 import './ManagerInfo.css';
 
 interface ManagerInfoProps {
-  managerType: 'information' | 'supply';
+  managerType: 'information' | 'supply' | 'infrastructure';
 }
 
 const ManagerInfo: React.FC<ManagerInfoProps> = ({ managerType }) => {

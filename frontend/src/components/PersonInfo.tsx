@@ -54,9 +54,13 @@ const PersonInfo: React.FC<PersonInfoProps> = ({ person }) => {
       'Player': 'Player',
       'supply_manager': '物資Manager',
       'information_manager': '情報Manager',
+      'infrastructure_manager': '土木Manager',
       'ワーカーA': 'Worker A',
       'ワーカーB': 'Worker B',
       'ワーカーC': 'Worker C',
+      '土木ワーカーA': '土木Worker A',
+      '土木ワーカーB': '土木Worker B',
+      '土木ワーカーC': '土木Worker C',
       'System': 'System'
     };
     return nameMap[personName] || personName;
@@ -116,6 +120,7 @@ const PersonInfo: React.FC<PersonInfoProps> = ({ person }) => {
                 <span className="knowledge-filename">
                   {person === 'supply_manager' ? 'knowledge_supply.txt' :
                    person === 'information_manager' ? 'knowledge_information.txt' :
+                   person === 'infrastructure_manager' ? 'knowledge_infrastructure.txt' :
                    'knowledge.txt'}
                 </span>
               </div>

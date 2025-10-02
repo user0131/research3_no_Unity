@@ -4,7 +4,7 @@ import { Message } from '../types';
 import './Chat.css';
 
 interface ChatProps {
-  selectedManager: 'information' | 'supply';
+  selectedManager: 'information' | 'supply' | 'infrastructure';
 }
 
 const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
@@ -109,11 +109,16 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
       'Player': 'Player',
       'supply_manager': '物資Manager',
       'information_manager': '情報Manager',
+      'infrastructure_manager': '土木Manager',
       'SUPPLY_MANAGER': '物資Manager',
       'INFORMATION_MANAGER': '情報Manager',
+      'INFRASTRUCTURE_MANAGER': '土木Manager',
       'ワーカーA': 'Worker A',
       'ワーカーB': 'Worker B',
       'ワーカーC': 'Worker C',
+      '土木ワーカーA': '土木Worker A',
+      '土木ワーカーB': '土木Worker B',
+      '土木ワーカーC': '土木Worker C',
       'System': 'System',
       'SYSTEM': 'System'
     };
@@ -123,7 +128,9 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
   const getMessageDirectionLabel = (message: Message, direction: string) => {
     if (direction === 'sent') {
       // Playerの発言：「→ 相手」
-      const toName = message.to || (selectedManager === 'information' ? '情報Manager' : '物資Manager');
+      const toName = message.to || (selectedManager === 'information' ? '情報Manager'
+                                   : selectedManager === 'supply' ? '物資Manager'
+                                   : '土木Manager');
       return `→ ${getPersonDisplayName(toName)}`;
     } else {
       // それ以外：「from → to」
@@ -137,7 +144,9 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
     <div className="chat-container">
       <div className="chat-header">
         <h2>
-          {selectedManager === 'information' ? '情報管理班' : '物資管理班'}
+          {selectedManager === 'information' ? '情報管理班'
+           : selectedManager === 'supply' ? '物資管理班'
+           : '建物・土木対策班'}
         </h2>
         <span className="current-time">現在時刻: {currentTime}</span>
       </div>

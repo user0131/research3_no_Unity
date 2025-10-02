@@ -379,6 +379,82 @@ def get_manager_debug_data():
 
             debug_data["supply_manager"] = supply_data
 
+        # 建物・土木対策班のデータ
+        if manager_type in ['all', 'infrastructure']:
+            infrastructure_data = {
+                "name": "建物・土木対策班",
+                "class": "InfrastructureManager",
+                "status": {
+                    "available": not getattr(chat.infrastructure_manager, 'away_from_desk', False),
+                    "in_conversation": getattr(chat.infrastructure_manager, 'in_conversation', False),
+                    "away_reason": getattr(chat.infrastructure_manager, 'away_reason', None)
+                },
+                "csv_files": {},
+                "memory": {
+                    "conversation_history_count": len(getattr(chat, 'infrastructure_conversation_history', [])),
+                    "conversation_sample": getattr(chat, 'infrastructure_conversation_history', [])[-3:] if getattr(chat, 'infrastructure_conversation_history', []) else []
+                },
+                "workers": []
+            }
+
+            # CSVデータの詳細 - 直接ファイルから読み込み
+            try:
+                import pandas as pd
+                from pathlib import Path
+
+                csv_path = Path("csv/infrastructure")
+                if csv_path.exists():
+                    for csv_file in csv_path.glob("*.csv"):
+                        try:
+                            df = pd.read_csv(csv_file)
+                            # NaN値を空文字列に変換
+                            df = df.fillna('')
+                            infrastructure_data["csv_files"][csv_file.name] = {
+                                "shape": df.shape,
+                                "columns": df.columns.tolist(),
+                                "sample_data": df.to_dict('records'),
+                                "dtypes": df.dtypes.astype(str).to_dict()
+                            }
+                        except Exception as file_error:
+                            print(f"Error reading {csv_file}: {file_error}")
+            except Exception as csv_error:
+                print(f"CSV data error for infrastructure_manager: {csv_error}")
+
+            # 知識ファイルの読み込み
+            try:
+                from pathlib import Path
+
+                knowledge_files = {}
+                knowledge_path = Path("src/knowledge")
+
+                # 建物・土木対策班専用knowledge
+                infrastructure_knowledge_path = knowledge_path / "knowledge_infrastructure.txt"
+                if infrastructure_knowledge_path.exists():
+                    with open(infrastructure_knowledge_path, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                        if content:
+                            knowledge_files["knowledge_infrastructure.txt"] = content
+
+                infrastructure_data["knowledge_files"] = knowledge_files
+            except Exception as knowledge_error:
+                print(f"Knowledge file error for infrastructure_manager: {knowledge_error}")
+
+            # ワーカー情報の詳細
+            try:
+                for worker_name, worker in chat.infrastructure_manager.workers.items():
+                    worker_info = {
+                        "name": getattr(worker, 'worker_name', worker_name),
+                        "type": "InfrastructureWorker",
+                        "available": not getattr(worker, 'is_busy', False),
+                        "current_task": getattr(worker, 'current_task', None),
+                        "task_end_time": getattr(worker, 'task_end_time', None)
+                    }
+                    infrastructure_data["workers"].append(worker_info)
+            except Exception as worker_error:
+                print(f"Worker data error for infrastructure_manager: {worker_error}")
+
+            debug_data["infrastructure_manager"] = infrastructure_data
+
         return jsonify(debug_data)
     except Exception as e:
         import traceback
@@ -493,6 +569,48 @@ def get_person_info():
                 person_info["available"] = worker.available
             else:
                 person_info["knowledge"] = "Worker情報が見つかりません"
+
+        elif person == "infrastructure_manager":
+            manager = chat.infrastructure_manager
+            # 知識情報
+            person_info["knowledge"] = manager.get_knowledge()
+            # CSV情報
+            csv_files = []
+            csv_path = Path("./csv/infrastructure")
+            if csv_path.exists():
+                for csv_file in csv_path.glob("*.csv"):
+                    try:
+                        import pandas as pd
+                        df = pd.read_csv(csv_file)
+                        csv_files.append({
+                            "name": csv_file.name,
+                            "rows": len(df),
+                            "columns": df.columns.tolist()
+                        })
+                    except:
+                        csv_files.append({
+                            "name": csv_file.name,
+                            "rows": 0,
+                            "columns": []
+                        })
+            person_info["csv_files"] = csv_files
+            person_info["available"] = not manager.away_until_time
+
+        elif person.startswith("土木ワーカー"):
+            # 土木ワーカーの場合、infrastructure_managerから情報取得
+            worker_name = person
+            workers = chat.infrastructure_manager.workers
+            worker = None
+            for w_name, w in workers.items():
+                if w.worker_name == worker_name:
+                    worker = w
+                    break
+
+            if worker:
+                person_info["knowledge"] = f"担当タスク: {worker.current_task or '待機中'}"
+                person_info["available"] = not worker.is_busy
+            else:
+                person_info["knowledge"] = "土木Worker情報が見つかりません"
 
         elif person == "Player":
             person_info["knowledge"] = "災害対応訓練参加者として、情報管理班と物資管理班と連携して対応を行う"
