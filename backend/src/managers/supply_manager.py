@@ -77,6 +77,10 @@ class SupplyManager:
 - **会話スタイル**: 同僚との自獨な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。ユーザに聞かれたこと以外は極力返さないように。
 - **情報の扱い**: あなたの知っている情報は会話履歴と「あなたが知っている知識」のみです。手持ちにない情報の推測や憶測は避けてください
 - **作業依頼**: Playerから明確に何かの作業を頼まれた場合のみ、作業を実行してください。それ以外は通常の会話をしてください。
+- **重要：在庫確認と承認プロセス**:
+  - **配送前の必須確認**: 物資配送を依頼された場合、まず必ずcheck_inventoryツールで在庫を確認し、Playerに現在の在庫状況を報告してください
+  - **在庫不足時の対応**: 要請数量に対して在庫が不足している場合は、配送を実行せず、Playerに在庫不足を報告して対応方針を相談してください
+  - **勝手な判断禁止**: 在庫が不足していても、勝手に調達したり、部分的に配送したりせず、必ずPlayerと相談してください
 - **重要：ツールの使用**: 実際の作業は必ずツールを使って実行してください。会話（テキスト応答）では作業を実行できません。
   - **ツール以外では実行不可**: 会話で「配送します」「手配しました」と言っても実際の作業は実行されません
   - **物資配送**: deliver_suppliesツールを使用（check_inventoryは確認のみで配送は行えません）
@@ -92,6 +96,7 @@ class SupplyManager:
 - 極力あなた(supply_manager)自身が作業を行うことは避けてください。workerの手が空いていない場合は、Playerにそのことを伝え、それでもやってほしいと頼まれた場合にあなた自身が作業をしてください。
 - ユーザに聞かれたこと以外は極力返さないように。
 - 物資配送や、物資調達のツールでは、Playerに対してツール実行の報告も関数内で行います。物資配送や、物資調達のツールを使う際に、Playerに会話を返答する必要なありません。
+- Playerから伝えられたことを実行するために、タスクを工夫する必要はありません。Playerから言われたことがシンプルにできない場合は、できない理由を簡潔にPlayerに伝えるだけで大丈夫です。
 
 ## Playerに無理に開示しなくて大丈夫な情報：
 以下の情報は、あなたが内部的に判断するために使用します。Playerに対しては詳細を説明する必要はありません。
@@ -280,9 +285,6 @@ Playerに対しては「手配します」「対応します」のように、�
     def _convert_to_natural_response(self, function_name: str, args: Dict, worker_response: str) -> str:
         """ワーカーの応答をPlayerに伝える自然な表現に変換"""
         try:
-            # JSON形式の情報を抽出して追加タスクとして実行
-            json_tasks = self._extract_and_execute_json_tasks(worker_response)
-
             client = self.client
 
             conversion_prompt = f"""
@@ -298,8 +300,6 @@ Playerに対しては「手配します」「対応します」のように、�
 - ワーカー名は含めない（「部下が」「担当者が」などで表現）
 - 配送の詳細情報は簡潔にまとめる
 
-例：「deliver_suppliesの実行を開始しました」→「配送を手配しました」
-
 短く簡潔に、話し言葉で返してください。
 """
 
@@ -310,7 +310,9 @@ Playerに対しては「手配します」「対応します」のように、�
 
             return response.choices[0].message.content
 
-        except Exception:
+        except Exception as e:
+            # エラーの詳細をログに出力
+            print(f"_convert_to_natural_response エラー: {e}")
             return worker_response
 
     def _generate_completion_summary(self, tool_calls) -> str:
@@ -344,7 +346,7 @@ Playerに対して、これらのタスクの手配が完了したことを報�
 - 「〜の手配が完了しました」「〜の配送手配が完了しました」のような形で
 - 簡潔で話し言葉で作成してください
 
-例：「春日小学校への水100本の配送手配が完了しました」
+例：「春日小学校への水100本の配送手配が完了」
 """
 
             response = client.chat.completions.create(
@@ -810,6 +812,10 @@ Playerに対して、これらの作業を今から実行することを報告�
 1. **Playerに報告する**: タスクが成功した場合、またはPlayerの判断が必要な場合
    → 最初の行に「[TO:Player]」と書き、次の行から「〜の作業が完了しました」のように状況を報告してください
 
+   特に重要：在庫不足の報告があった場合は必ずPlayerに報告してください。
+   - 「在庫不足」「在庫が完全にありません」「在庫が〜しかありません」などの文言が含まれる場合
+   - 「配送できませんでした」「配送に失敗」などの文言が含まれる場合
+
 2. **追加タスクが必要な場合**: 報告内容から追加作業が必要と判断した場合
    → 最初の行に「[ADDITIONAL_TASK:必要]」と書き、次の行から追加タスクの理由を説明してください
 
@@ -818,7 +824,13 @@ Playerに対して、これらの作業を今から実行することを報告�
    - 在庫が少なくなったため調達が必要な場合
    - 関連する別の作業が必要な場合
 
+   ※ただし、在庫不足の場合は追加タスクではなくPlayerへの報告を優先してください
+
 重要: 必ず最初の行に「[TO:Player]」または「[ADDITIONAL_TASK:必要]」のいずれかを明記してください。
+在庫不足の場合は必ず「[TO:Player]」を選択してください。
+
+重要: - 詳細情報は簡潔にまとめる
+短く簡潔に、話し言葉で返してください。余計なリクエストはせずに。
 """
 
             response = client.chat.completions.create(
@@ -959,7 +971,7 @@ Playerに対して、これらのタスクが完了したことを報告する�
             "type": "function",
             "function": {
                 "name": "deliver_supplies",
-                "description": "避難所に物資を配送する。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。このツールを実行した場合、Playerへの報告は関数内で自動的に行われるため、追加の会話応答は不要。",
+                "description": "避難所に物資を配送する。重要：このツールは在庫確認して報告した後にのみ使用してください。在庫不足の場合は配送されません。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -1077,11 +1089,13 @@ Playerに対して、これらのタスクが完了したことを報告する�
                 has_execution_tools = any(tr["function_name"] in ["deliver_supplies", "procure_supplies"] for tr in tool_results)
 
                 if has_execution_tools:
-                    # 実行系ツールがある場合（Playerへの通知は既に送信済みのため、追加出力なし）
+                    # 実行系ツールがある場合
                     execution_tasks = [tr for tr in tool_results if tr["function_name"] in ["deliver_supplies", "procure_supplies"]]
 
-                    # 実行系ツールの場合はPlayerに追加で何も返さない
-                    assistant_message = ""
+                    # 実行系ツールの結果をまとめて返す TODO 
+                    # （Playerへの通知は既に送信されているが、空を返すとUIで問題が生じる）
+                    results = [tr["result"] for tr in execution_tasks if tr["result"]]
+                    assistant_message = results[0] if results else "手配を進めています。"
 
                 elif has_confirmation_tools:
                     # 確認系のみの場合は、ループでツール呼び出しを処理

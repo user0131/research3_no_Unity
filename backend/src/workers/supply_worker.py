@@ -64,6 +64,7 @@ class SupplyWorker(BaseWorker):
             # 在庫情報を取得
             row_index = None
             current_stock = 0
+            item_found = False
 
             with open(self.inventory_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
@@ -73,11 +74,42 @@ class SupplyWorker(BaseWorker):
                         current_stock = int(row['在庫数'])
                         if not unit:
                             unit = row['単位']
+                        item_found = True
                         break
 
-            # 在庫を減らす
+            # 物資が見つからない場合
+            if not item_found:
+                return {
+                    "success": False,
+                    "message": f"エラー: {item_name}は在庫リストに存在しません",
+                    "shortage_type": "item_not_found",
+                    "requested": {"item": item_name, "quantity": quantity}
+                }
+
+            # 在庫不足チェック
+            if current_stock < quantity:
+                shortage_amount = quantity - current_stock
+                if current_stock == 0:
+                    return {
+                        "success": False,
+                        "message": f"在庫不足: {item_name}の在庫が完全にありません（要請: {quantity}{unit}）",
+                        "shortage_type": "no_stock",
+                        "requested": {"item": item_name, "quantity": quantity, "unit": unit},
+                        "available": {"quantity": 0, "unit": unit}
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"在庫不足: {item_name}の在庫が{current_stock}{unit}しかありません（要請: {quantity}{unit}、不足: {shortage_amount}{unit}）",
+                        "shortage_type": "insufficient_stock",
+                        "requested": {"item": item_name, "quantity": quantity, "unit": unit},
+                        "available": {"quantity": current_stock, "unit": unit},
+                        "shortage": {"quantity": shortage_amount, "unit": unit}
+                    }
+
+            # 在庫が十分にある場合のみ配送処理を実行
             if row_index is not None:
-                new_stock = max(0, current_stock - quantity)
+                new_stock = current_stock - quantity
                 update_csv_from_knowledge(
                     update_spec={
                         "filename": "物資在庫情報.csv",
@@ -214,6 +246,21 @@ class SupplyWorker(BaseWorker):
         try:
             # マネージャーのOpenAIクライアントを使用
             client = self.manager.client
+
+            # 在庫不足の場合は特別な報告を生成
+            shortage_type = task_result.get("shortage_type")
+            if shortage_type:
+                if shortage_type == "no_stock":
+                    requested = task_result.get("requested", {})
+                    return f"班長、申し訳ありません。{requested.get('item', '')}の在庫が完全にありません。{self.current_task}を実行できませんでした。"
+                elif shortage_type == "insufficient_stock":
+                    requested = task_result.get("requested", {})
+                    available = task_result.get("available", {})
+                    shortage = task_result.get("shortage", {})
+                    return f"班長、{requested.get('item', '')}の在庫が{available.get('quantity', 0)}{available.get('unit', '')}しかありません。要請の{requested.get('quantity', 0)}{requested.get('unit', '')}に対して{shortage.get('quantity', 0)}{shortage.get('unit', '')}不足しています。配送できませんでした。"
+                elif shortage_type == "item_not_found":
+                    requested = task_result.get("requested", {})
+                    return f"班長、{requested.get('item', '')}という物資が在庫リストに見つかりません。配送できませんでした。"
 
             report_prompt = f"""
 あなたは{self.worker_name}です。上司のsupply_managerに作業完了の報告をしてください。

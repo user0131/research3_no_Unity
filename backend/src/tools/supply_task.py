@@ -66,7 +66,12 @@ class SupplyInventoryTool:
                         break
 
             if row_index is not None:
-                new_stock = max(0, current_stock - quantity)
+                # 在庫不足チェック
+                if current_stock < quantity:
+                    print(f"在庫不足: {item_name}の在庫が{current_stock}個しかありません（要求: {quantity}個）")
+                    return False
+
+                new_stock = current_stock - quantity
                 update_csv_from_knowledge(
                     update_spec={
                         "filename": "物資在庫情報.csv",
