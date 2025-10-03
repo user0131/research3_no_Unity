@@ -35,7 +35,16 @@ def _add_csv_to_knowledge(csv_file_path: Path, knowledge_file_path: str):
         # カラム説明を読み込み（設定ファイルから）
         column_descriptions = {}
         csv_description = "(説明なし)"
-        desc_file_path = Path(f"config/column_descriptions/{filename.replace('.csv', '.json')}")
+        # 部門別フォルダから説明ファイルを探す
+        desc_file_path = None
+        for dept in ['supply', 'infrastructure', 'information']:
+            candidate_path = Path(f"config/column_descriptions/{dept}/{filename.replace('.csv', '.json')}")
+            if candidate_path.exists():
+                desc_file_path = candidate_path
+                break
+
+        if desc_file_path is None:
+            desc_file_path = Path(f"config/column_descriptions/{filename.replace('.csv', '.json')}")
         if desc_file_path.exists():
             import json
             with open(desc_file_path, 'r', encoding='utf-8') as f:
@@ -654,29 +663,35 @@ def reset_system():
             knowledge_path = Path("src/knowledge")
             knowledge_path.mkdir(exist_ok=True)
 
-            # 知識ファイルを空にして初期化
-            (knowledge_path / "knowledge_information.txt").write_text("", encoding="utf-8")
-            (knowledge_path / "knowledge_supply.txt").write_text("", encoding="utf-8")
+            # 知識ファイルを初期内容で初期化
+            init_knowledge_path = Path("config/init_knowledge")
 
-            # 建設・土木班の知識ファイルには初期内容を設定
-            infrastructure_initial_path = Path("config/infrastructure_initial_knowledge.txt")
-            if infrastructure_initial_path.exists():
-                initial_content = infrastructure_initial_path.read_text(encoding="utf-8")
-                (knowledge_path / "knowledge_infrastructure.txt").write_text(initial_content, encoding="utf-8")
-            else:
-                (knowledge_path / "knowledge_infrastructure.txt").write_text("", encoding="utf-8")
+            for knowledge_file in ["knowledge_information.txt", "knowledge_supply.txt", "knowledge_infrastructure.txt"]:
+                init_file_path = init_knowledge_path / knowledge_file
+                target_file_path = knowledge_path / knowledge_file
+
+                if init_file_path.exists():
+                    initial_content = init_file_path.read_text(encoding="utf-8")
+                    target_file_path.write_text(initial_content, encoding="utf-8")
+                else:
+                    target_file_path.write_text("", encoding="utf-8")
 
             # 初期データファイルをコピーし、知識ファイルにCSV情報を追加
             if init_data_path.exists():
-                for file in init_data_path.glob("*.csv"):
-                    if "物資" in file.name:
-                        shutil.copy2(file, csv_path / "supply" / file.name)
-                        # 物資管理班の知識ファイルにCSV情報を追加
-                        _add_csv_to_knowledge(file, "src/knowledge/knowledge_supply.txt")
-                    else:
-                        shutil.copy2(file, csv_path / "information" / file.name)
-                        # 情報管理班の知識ファイルにCSV情報を追加
-                        _add_csv_to_knowledge(file, "src/knowledge/knowledge_information.txt")
+                # 部門別フォルダから初期データをコピー
+                dept_mappings = {
+                    'supply': 'knowledge_supply.txt',
+                    'infrastructure': 'knowledge_infrastructure.txt',
+                    'information': 'knowledge_information.txt'
+                }
+
+                for dept, knowledge_file in dept_mappings.items():
+                    dept_init_path = init_data_path / dept
+                    if dept_init_path.exists():
+                        for file in dept_init_path.glob("*.csv"):
+                            shutil.copy2(file, csv_path / dept / file.name)
+                            # 対応する知識ファイルにCSV情報を追加
+                            _add_csv_to_knowledge(file, f"src/knowledge/{knowledge_file}")
 
         # 新しいチャットインスタンスを作成
         new_chat = get_chat_instance()
