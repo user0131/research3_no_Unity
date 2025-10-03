@@ -38,9 +38,9 @@ class SupplyManager:
 
         # 3人のワーカーを初期化
         self.workers = {
-            "worker_a": SupplyWorker("ワーカーA", self, time_manager),
-            "worker_b": SupplyWorker("ワーカーB", self, time_manager),
-            "worker_c": SupplyWorker("ワーカーC", self, time_manager)
+            "worker_a": SupplyWorker("物資ワーカーA", self, time_manager),
+            "worker_b": SupplyWorker("物資ワーカーB", self, time_manager),
+            "worker_c": SupplyWorker("物資ワーカーC", self, time_manager)
         }
 
     def _initialize_inventory(self):
@@ -238,9 +238,9 @@ Playerに対しては「手配します」「対応します」のように、�
         """指定されたワーカーにタスクを依頼"""
         # ワーカー名から対応するキーを取得
         worker_key_map = {
-            "ワーカーA": "worker_a",
-            "ワーカーB": "worker_b",
-            "ワーカーC": "worker_c"
+            "物資ワーカーA": "worker_a",
+            "物資ワーカーB": "worker_b",
+            "物資ワーカーC": "worker_c"
         }
 
         worker_key = worker_key_map.get(worker_name)
@@ -978,7 +978,7 @@ Playerに対して、これらのタスクが完了したことを報告する�
                         "shelter_name": {"type": "string", "description": "配送先の避難所名"},
                         "item_name": {"type": "string", "description": "配送する物資名"},
                         "quantity": {"type": "integer", "description": "配送数量"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["ワーカーA", "ワーカーB", "ワーカーC", "マネージャー自身"]}
+                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["物資ワーカーA", "物資ワーカーB", "物資ワーカーC", "マネージャー自身"]}
                     },
                     "required": ["shelter_name", "item_name", "quantity", "assigned_worker"]
                 }
@@ -1026,7 +1026,7 @@ Playerに対して、これらのタスクが完了したことを報告する�
                     "properties": {
                         "item_name": {"type": "string", "description": "調達する物資名"},
                         "quantity": {"type": "integer", "description": "調達数量"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["ワーカーA", "ワーカーB", "ワーカーC", "マネージャー自身"]}
+                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["物資ワーカーA", "物資ワーカーB", "物資ワーカーC", "マネージャー自身"]}
                     },
                     "required": ["item_name", "quantity", "assigned_worker"]
                 }

@@ -23,7 +23,7 @@ function App() {
     if (saved) {
       // 保存された人物が現在のmanagerで有効かチェック
       const validPersons = selectedManager === 'supply'
-        ? ['supply_manager', 'ワーカーA', 'ワーカーB', 'ワーカーC']
+        ? ['supply_manager', '物資ワーカーA', '物資ワーカーB', '物資ワーカーC']
         : selectedManager === 'infrastructure'
         ? ['infrastructure_manager', '土木ワーカーA', '土木ワーカーB', '土木ワーカーC']
         : ['Player', 'information_manager'];
@@ -60,7 +60,7 @@ function App() {
 
   const getPersonsForManager = (managerType: 'information' | 'supply' | 'infrastructure') => {
     if (managerType === 'supply') {
-      return ['supply_manager', 'ワーカーA', 'ワーカーB', 'ワーカーC'];
+      return ['supply_manager', '物資ワーカーA', '物資ワーカーB', '物資ワーカーC'];
     } else if (managerType === 'infrastructure') {
       return ['infrastructure_manager', '土木ワーカーA', '土木ワーカーB', '土木ワーカーC'];
     } else {

@@ -367,9 +367,9 @@ def get_manager_debug_data():
                 if hasattr(chat.supply_manager, 'workers'):
                     for worker_name, worker in chat.supply_manager.workers.items():
                         worker_info = {
-                            "name": worker_name,
+                            "name": getattr(worker, 'worker_name', worker_name),
                             "type": type(worker).__name__,
-                            "available": worker.is_available() if hasattr(worker, 'is_available') else True,
+                            "available": not getattr(worker, 'is_busy', False),
                             "is_busy": getattr(worker, 'is_busy', False),
                             "current_task": getattr(worker, 'current_task', None)
                         }
@@ -554,19 +554,19 @@ def get_person_info():
             person_info["csv_files"] = csv_files
             person_info["available"] = not manager.away_until_time
 
-        elif person.startswith("ワーカー"):
+        elif person.startswith("物資ワーカー"):
             # Workerの場合、supply_managerから情報取得
             worker_name = person
             workers = chat.supply_manager.workers
             worker = None
-            for w in workers:
+            for w_name, w in workers.items():
                 if w.worker_name == worker_name:
                     worker = w
                     break
 
             if worker:
                 person_info["knowledge"] = f"担当タスク: {worker.current_task or '待機中'}"
-                person_info["available"] = worker.available
+                person_info["available"] = not worker.is_busy
             else:
                 person_info["knowledge"] = "Worker情報が見つかりません"
 
