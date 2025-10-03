@@ -14,6 +14,7 @@ class InfrastructureWorker(BaseWorker):
     def __init__(self, worker_name: str, manager, time_manager):
         # 建物・産業・土木対策の実行機能
         available_functions = [
+            "inspect_damage",
             "secure_road",
             "emergency_restoration",
             "handle_debris"
@@ -42,8 +43,12 @@ class InfrastructureWorker(BaseWorker):
 
         function_name = self.task_data.get("function")
 
+        # 被害調査
+        if function_name == "inspect_damage":
+            return self._inspect_damage()
+
         # 道路確保作業
-        if function_name == "secure_road":
+        elif function_name == "secure_road":
             return self._secure_road()
 
         # 応急復旧作業
@@ -56,6 +61,55 @@ class InfrastructureWorker(BaseWorker):
 
         else:
             return {"success": False, "message": f"未対応の機能: {function_name}"}
+
+    def _inspect_damage(self) -> Dict[str, Any]:
+        """被害調査を実行"""
+        location = self.task_data.get("location", "")
+        facility_type = self.task_data.get("facility_type", "")
+
+        try:
+            # 調査結果をシミュレート
+            import random
+            damage_levels = ["軽微", "中程度", "重大", "倒壊危険"]
+            damage_level = random.choice(damage_levels)
+
+            # 調査記録を追加
+            update_csv_from_knowledge(
+                update_spec={
+                    "filename": "被害調査報告.csv",
+                    "append_rows": [
+                        {
+                            "objects": [
+                                {
+                                    "調査日時": self.time_manager.get_current_time(),
+                                    "場所": location,
+                                    "施設種別": facility_type,
+                                    "被害程度": damage_level,
+                                    "被害詳細": f"{facility_type}の被害状況を確認",
+                                    "調査者": self.worker_name,
+                                    "対応状況": "調査完了",
+                                    "備考": "詳細評価実施済み"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                knowledge_path=str(self.knowledge_path),
+                time_manager=self.time_manager
+            )
+
+            return {
+                "success": True,
+                "message": f"{location}の{facility_type}調査が完了しました。被害程度: {damage_level}",
+                "details": {
+                    "location": location,
+                    "facility_type": facility_type,
+                    "damage_level": damage_level,
+                    "status": "調査完了"
+                }
+            }
+        except Exception as e:
+            return {"success": False, "message": f"被害調査エラー: {e}"}
 
     def _secure_road(self) -> Dict[str, Any]:
         """道路確保作業を実行"""

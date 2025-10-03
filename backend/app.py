@@ -648,6 +648,7 @@ def reset_system():
             csv_path.mkdir(exist_ok=True)
             (csv_path / "supply").mkdir(exist_ok=True)
             (csv_path / "information").mkdir(exist_ok=True)
+            (csv_path / "infrastructure").mkdir(exist_ok=True)
 
             # 知識ファイルを初期化
             knowledge_path = Path("src/knowledge")
@@ -656,6 +657,14 @@ def reset_system():
             # 知識ファイルを空にして初期化
             (knowledge_path / "knowledge_information.txt").write_text("", encoding="utf-8")
             (knowledge_path / "knowledge_supply.txt").write_text("", encoding="utf-8")
+
+            # 建設・土木班の知識ファイルには初期内容を設定
+            infrastructure_initial_path = Path("config/infrastructure_initial_knowledge.txt")
+            if infrastructure_initial_path.exists():
+                initial_content = infrastructure_initial_path.read_text(encoding="utf-8")
+                (knowledge_path / "knowledge_infrastructure.txt").write_text(initial_content, encoding="utf-8")
+            else:
+                (knowledge_path / "knowledge_infrastructure.txt").write_text("", encoding="utf-8")
 
             # 初期データファイルをコピーし、知識ファイルにCSV情報を追加
             if init_data_path.exists():

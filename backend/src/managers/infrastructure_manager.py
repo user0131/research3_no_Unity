@@ -74,7 +74,7 @@ class InfrastructureManager:
 ## 災害対応ルール：
 - **会話スタイル**: 同僚との自然な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。ユーザに聞かれたこと以外は極力返さないように。
 - **情報の扱い**: あなたの知っている情報は会話履歴と「あなたが知っている知識」のみです。手持ちにない情報の推測や憶測は避けてください
-- **作業依頼**: Playerから明確に何かの作業を頼まれた場合のみ、作業を実行してください。それ以外は通常の会話をしてください。
+- **作業依頼**: Playerから明確に、具体的に何かの作業を頼まれた場合のみ、作業を実行してください。それ以外は通常の会話をしてください。
 - **重要：現場確認と承認プロセス**:
   - **作業前の必須確認**: 復旧作業を依頼された場合、まず必ずinspect_damageツールで被害状況を確認し、Playerに現在の状況を報告してください
   - **危険箇所の対応**: 危険度が高い場所については、必ずPlayerに報告して対応方針を相談してください
@@ -198,16 +198,16 @@ Playerに対しては「手配します」「対応します」のように、�
         self._record_tool_execution(tool_name, args)
 
         # 確認系（マネージャー専用）
-        if tool_name == "inspect_damage":
-            return self._execute_manager_task("inspect_damage", args)
-
-        elif tool_name == "show_damage_report":
+        if tool_name == "show_damage_report":
             return self._execute_manager_task("show_damage_report", args)
 
         elif tool_name == "show_restoration_log":
             return self._execute_manager_task("show_restoration_log", args)
 
         # 実行系（ワーカー指定可能）
+        elif tool_name == "inspect_damage":
+            return self._handle_task_assignment("inspect_damage", args)
+
         elif tool_name == "secure_road":
             return self._handle_task_assignment("secure_road", args)
 
@@ -232,9 +232,9 @@ Playerに対しては「手配します」「対応します」のように、�
     def _assign_specific_worker_task(self, worker_name: str, function_name: str, args: Dict) -> str:
         """指定されたワーカーにタスクを依頼"""
         worker_key_map = {
-            "ワーカーA": "worker_a",
-            "ワーカーB": "worker_b",
-            "ワーカーC": "worker_c"
+            "土木ワーカーA": "worker_a",
+            "土木ワーカーB": "worker_b",
+            "土木ワーカーC": "worker_c"
         }
 
         worker_key = worker_key_map.get(worker_name)
@@ -349,10 +349,8 @@ Playerに対しては「手配します」「対応します」のように、�
     def _execute_manager_task(self, function_name: str, args: Dict) -> str:
         """マネージャー自身がタスクを実行"""
         if function_name == "inspect_damage":
-            location = args.get("location", "")
-            facility_type = args.get("facility_type", "")
-            damage_status = self.inspection_tool.inspect_damage(location, facility_type)
-            return f"（マネージャー自身で確認）{location}の{facility_type}調査結果: {damage_status}"
+            self.pending_inspection = args
+            return self.execute_task_with_delay("被害調査", args)
 
         elif function_name == "show_damage_report":
             return self._show_damage_report()
@@ -451,6 +449,32 @@ Playerに対しては「手配します」「対応します」のように、�
 
         return completed_results
 
+    def _generate_manager_completion_message(self, task_name: str, task_result: Dict[str, Any]) -> str:
+        """マネージャー自身のタスク完了時のつぶやきメッセージを生成"""
+        try:
+            client = self.client
+
+            completion_prompt = f"""
+あなたはinfrastructure_managerです。自分で以下のタスクを完了しました。
+
+完了したタスク: {task_name}
+結果: {task_result.get('message', '完了')}
+成功: {task_result.get('success', True)}
+
+自分がタスクを完了した時の自然なつぶやきメッセージを作成してください。
+「よし、～完了」や「～が終わった」のような感じで、短くて自然に。
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": completion_prompt}]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception:
+            return f"よし、私の{task_name}完了。"
+
     def _process_worker_report(self, worker_name: str, worker_report: str) -> str:
         """Workerの完了報告を処理"""
         try:
@@ -479,19 +503,20 @@ Playerに対して、この作業完了を報告する簡潔なメッセージ�
         """Function calling用の定義を取得"""
         defs = []
 
-        # 現場確認（マネージャー専用）
+        # 現場確認（ワーカー指定可能）
         defs.append({
             "type": "function",
             "function": {
                 "name": "inspect_damage",
-                "description": "道路、橋りょう、公園、河川等の土木施設の被害調査を行う。マネージャー自身が実行。",
+                "description": "道路、橋りょう、公園、河川等の土木施設の被害調査を行う。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "location": {"type": "string", "description": "調査場所"},
-                        "facility_type": {"type": "string", "description": "施設種別（道路、橋、公園、河川、土砂災害危険箇所等）"}
+                        "facility_type": {"type": "string", "description": "施設種別（道路、橋、公園、河川、土砂災害危険箇所等）"},
+                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["土木ワーカーA", "土木ワーカーB", "土木ワーカーC", "マネージャー自身"]}
                     },
-                    "required": ["location", "facility_type"]
+                    "required": ["location", "facility_type", "assigned_worker"]
                 }
             }
         })
@@ -506,7 +531,7 @@ Playerに対して、この作業完了を報告する簡潔なメッセージ�
                     "type": "object",
                     "properties": {
                         "location": {"type": "string", "description": "作業場所"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名", "enum": ["ワーカーA", "ワーカーB", "ワーカーC", "マネージャー自身"]}
+                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["土木ワーカーA", "土木ワーカーB", "土木ワーカーC", "マネージャー自身"]}
                     },
                     "required": ["location", "assigned_worker"]
                 }
@@ -524,7 +549,7 @@ Playerに対して、この作業完了を報告する簡潔なメッセージ�
                     "properties": {
                         "location": {"type": "string", "description": "作業場所"},
                         "work_type": {"type": "string", "description": "作業種別（道路補修、橋梁応急処置、河川護岸補修等）"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名", "enum": ["ワーカーA", "ワーカーB", "ワーカーC", "マネージャー自身"]}
+                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["土木ワーカーA", "土木ワーカーB", "土木ワーカーC", "マネージャー自身"]}
                     },
                     "required": ["location", "work_type", "assigned_worker"]
                 }
@@ -542,7 +567,7 @@ Playerに対して、この作業完了を報告する簡潔なメッセージ�
                     "properties": {
                         "location": {"type": "string", "description": "作業場所"},
                         "debris_type": {"type": "string", "description": "廃棄物種別（がれき、土砂、倒木等）"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名", "enum": ["ワーカーA", "ワーカーB", "ワーカーC", "マネージャー自身"]}
+                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["土木ワーカーA", "土木ワーカーB", "土木ワーカーC", "マネージャー自身"]}
                     },
                     "required": ["location", "debris_type", "assigned_worker"]
                 }
@@ -579,6 +604,193 @@ Playerに対して、この作業完了を報告する簡潔なメッセージ�
 
         return defs
 
+    def _process_tool_loop(self, messages: List[Dict], initial_tool_results: List[Dict]) -> str:
+        """ループでツール呼び出しを処理（2回目以降対応）"""
+        # 最初のツール結果を会話履歴に追加
+        messages.append({
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [tr["tool_call"].model_dump() for tr in initial_tool_results]
+        })
+
+        for tr in initial_tool_results:
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tr["tool_call"].id,
+                "name": tr["function_name"],
+                "content": tr["result"]
+            })
+
+        # ループでツール呼び出しを処理
+        max_iterations = 5  # 無限ループを防ぐため
+        iteration = 0
+
+        while iteration < max_iterations:
+            iteration += 1
+
+            # LLMに結果を解釈させ、必要に応じて追加ツールを実行
+            response = self.client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=messages,
+                tools=self.get_function_definitions(),
+                tool_choice="auto"
+            )
+
+            message = response.choices[0].message
+
+            # ツール呼び出しがない場合は終了
+            if not getattr(message, "tool_calls", None):
+                return message.content if message.content else ""
+
+            # 実行系ツールがある場合は先にPlayerに一括通知
+            execution_tool_calls = [tc for tc in message.tool_calls
+                                   if tc.function.name in ["inspect_damage", "secure_road", "emergency_restoration", "handle_debris"]]
+            if execution_tool_calls:
+                # 複数タスクをまとめた通知を生成してPlayerに先に送信
+                execution_tasks_preview = []
+                for tool_call in execution_tool_calls:
+                    args = json.loads(tool_call.function.arguments or "{}")
+                    execution_tasks_preview.append({
+                        "tool_call": tool_call,
+                        "function_name": tool_call.function.name,
+                        "result": ""  # まだ実行していないので空
+                    })
+
+                combined_notification = self._generate_combined_assignment_notification(execution_tasks_preview)
+                if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+                    self.manager.add_message("assistant", "infrastructure_manager", combined_notification, "infrastructure", from_person="infrastructure_manager", to_person="Player")
+
+            # ツールを実行
+            tool_results = []
+            for tool_call in message.tool_calls:
+                fname = tool_call.function.name
+                args = json.loads(tool_call.function.arguments or "{}")
+
+                tool_result = self.create_tool_response(fname, args)
+                tool_results.append(tool_result)
+
+            # 実行系ツールがある場合は完了メッセージを返して終了
+            if any(tc.function.name in ["inspect_damage", "secure_road", "emergency_restoration", "handle_debris"] for tc in message.tool_calls):
+                return self._generate_completion_summary(message.tool_calls)
+
+            # 確認系ツールの場合は会話履歴に追加して継続
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [tc.model_dump() for tc in message.tool_calls]
+            })
+
+            for i, tool_call in enumerate(message.tool_calls):
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "content": tool_results[i]
+                })
+
+        # 最大反復回数に達した場合
+        return "処理が完了しました。"
+
+    def _generate_combined_assignment_notification(self, execution_tasks: list) -> str:
+        """複数のタスクをまとめてPlayerに通知"""
+        try:
+            client = self.client
+
+            # 実行タスクの情報をまとめる
+            tasks_info = []
+            for task in execution_tasks:
+                tool_call = task["tool_call"]
+                args = json.loads(tool_call.function.arguments or "{}")
+
+                if tool_call.function.name == "inspect_damage":
+                    location = args.get("location", "場所")
+                    facility_type = args.get("facility_type", "施設")
+                    tasks_info.append(f"{location}の{facility_type}調査")
+                elif tool_call.function.name == "secure_road":
+                    location = args.get("location", "場所")
+                    tasks_info.append(f"{location}の道路確保")
+                elif tool_call.function.name == "emergency_restoration":
+                    location = args.get("location", "場所")
+                    work_type = args.get("work_type", "作業")
+                    tasks_info.append(f"{location}の{work_type}")
+                elif tool_call.function.name == "handle_debris":
+                    location = args.get("location", "場所")
+                    debris_type = args.get("debris_type", "廃棄物")
+                    tasks_info.append(f"{location}の{debris_type}処理")
+
+            notification_prompt = f"""
+あなたはinfrastructure_managerです。以下の複数のタスクを部下に依頼することになり、それをPlayerに報告することになりました。
+
+実行予定のタスク:
+{chr(10).join(f"- {task}" for task in tasks_info)}
+
+Playerに対して、これらの作業を今から実行することを報告する自然な返答を作成してください。
+- 「部下に〇〇と△△を依頼します」のような形で複数タスクをまとめて表現
+- 簡潔で話し言葉で作成してください
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": notification_prompt}]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception:
+            # フォールバック
+            if len(execution_tasks) == 1:
+                return "部下に作業を依頼します。"
+            else:
+                return f"部下に{len(execution_tasks)}件の作業を依頼します。"
+
+    def _generate_completion_summary(self, tool_calls) -> str:
+        """実行されたツールの内容をまとめた完了メッセージを生成"""
+        try:
+            client = self.client
+
+            # ツール実行内容をまとめる
+            tasks_summary = []
+            for tool_call in tool_calls:
+                if tool_call.function.name in ["inspect_damage", "secure_road", "emergency_restoration", "handle_debris"]:
+                    args = json.loads(tool_call.function.arguments or "{}")
+
+                    if tool_call.function.name == "inspect_damage":
+                        location = args.get("location", "場所")
+                        facility_type = args.get("facility_type", "施設")
+                        tasks_summary.append(f"{location}の{facility_type}調査")
+                    elif tool_call.function.name == "secure_road":
+                        location = args.get("location", "場所")
+                        tasks_summary.append(f"{location}の道路確保")
+                    elif tool_call.function.name == "emergency_restoration":
+                        location = args.get("location", "場所")
+                        work_type = args.get("work_type", "作業")
+                        tasks_summary.append(f"{location}の{work_type}")
+                    elif tool_call.function.name == "handle_debris":
+                        location = args.get("location", "場所")
+                        debris_type = args.get("debris_type", "廃棄物")
+                        tasks_summary.append(f"{location}の{debris_type}処理")
+
+            summary_prompt = f"""
+あなたはinfrastructure_managerです。以下のタスクを完了しました。
+
+実行したタスク:
+{chr(10).join(f"- {task}" for task in tasks_summary)}
+
+Playerに対して、これらのタスクの手配が完了したことを報告する自然な会話メッセージを作成してください。
+- 「～の手配が完了しました」のような形で
+- 簡潔で話し言葉で作成してください
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": summary_prompt}]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception:
+            return "手配が完了しました。"
+
     def process_response(self, messages: List[Dict[str, str]]) -> tuple[str, str]:
         """OpenAI APIレスポンスを処理"""
         response = self.client.chat.completions.create(
@@ -590,10 +802,29 @@ Playerに対して、この作業完了を報告する簡潔なメッセージ�
 
         response_message = response.choices[0].message
 
-        # ツール呼び出しがあれば実行
+        # ツール呼び出しがあれば実行（複数対応）
         if getattr(response_message, "tool_calls", None):
             tool_results = []
 
+            # 実行系ツールがある場合は先にPlayerに一括通知
+            execution_tool_calls = [tc for tc in response_message.tool_calls
+                                   if tc.function.name in ["inspect_damage", "secure_road", "emergency_restoration", "handle_debris"]]
+            if execution_tool_calls:
+                # 複数タスクをまとめた通知を生成してPlayerに先に送信
+                execution_tasks_preview = []
+                for tool_call in execution_tool_calls:
+                    args = json.loads(tool_call.function.arguments or "{}")
+                    execution_tasks_preview.append({
+                        "tool_call": tool_call,
+                        "function_name": tool_call.function.name,
+                        "result": ""  # まだ実行していないので空
+                    })
+
+                combined_notification = self._generate_combined_assignment_notification(execution_tasks_preview)
+                if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+                    self.manager.add_message("assistant", "infrastructure_manager", combined_notification, "infrastructure", from_person="infrastructure_manager", to_person="Player")
+
+            # 複数のツール呼び出しを順次処理
             for tool_call in response_message.tool_calls:
                 fname = tool_call.function.name
                 args = json.loads(tool_call.function.arguments or "{}")
@@ -601,16 +832,35 @@ Playerに対して、この作業完了を報告する簡潔なメッセージ�
                 if fname:
                     tool_result = self.create_tool_response(fname, args)
                     tool_results.append({
+                        "tool_call": tool_call,
                         "function_name": fname,
                         "result": tool_result
                     })
 
-            # 結果をまとめて返す
+            # 複数のツール結果を処理
             if tool_results:
-                assistant_message = tool_results[0]["result"] if len(tool_results) == 1 else "\n\n".join([tr["result"] for tr in tool_results])
+                # 確認系と実行系が混在する可能性があるため、適切に処理
+                has_confirmation_tools = any(tr["function_name"] in ["show_damage_report", "show_restoration_log"] for tr in tool_results)
+                has_execution_tools = any(tr["function_name"] in ["inspect_damage", "secure_road", "emergency_restoration", "handle_debris"] for tr in tool_results)
+
+                if has_execution_tools:
+                    # 実行系ツールがある場合
+                    execution_tasks = [tr for tr in tool_results if tr["function_name"] in ["inspect_damage", "secure_road", "emergency_restoration", "handle_debris"]]
+
+                    # 実行系ツールの結果をまとめて返す
+                    results = [tr["result"] for tr in execution_tasks if tr["result"]]
+                    assistant_message = results[0] if results else "手配を進めています。"
+
+                elif has_confirmation_tools:
+                    # 確認系のみの場合は、ループでツール呼び出しを処理
+                    assistant_message = self._process_tool_loop(messages, tool_results)
+                else:
+                    # その他の場合
+                    assistant_message = "\n\n".join([tr["result"] for tr in tool_results])
             else:
-                assistant_message = "ツール実行エラー"
+                assistant_message = "no_tool"
         else:
-            assistant_message = response_message.content
+            # 通常の会話応答
+            assistant_message = response_message.content if response_message.content else ""
 
         return assistant_message, "infrastructure_manager"
