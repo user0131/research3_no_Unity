@@ -43,21 +43,71 @@ def rag_read(query: str) -> str:
         return f"ベクトル検索エラー: {str(e)}"
 
 
-# knowledge.txtに、調べた結果を入れる。これにより、もう知っていることを以降は調べなくても良くなる
+# knowledge.txtに、調べた結果を要約してマニュアルの知識として入れる
 def add_search_to_knowledge(query: str, search_result: str, knowledge_path: Optional[Path] = None) -> bool:
     try:
         if knowledge_path is None:
             knowledge_path = Path("./src/knowledge.txt")
 
+        # OpenAI APIで検索結果を要約・整形
+        client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+
+        summary_prompt = f"""
+以下の防災マニュアルの検索結果を要約し、実務で使える知識として整理してください。
+
+【検索クエリ】{query}
+
+【検索結果】
+{search_result}
+
+【整形の指針】
+1. 見出しは「### {query}」の形式で開始
+2. 内容は段落で適切に区切る
+3. 具体的な数値や基準は必ず含める
+4. 実務手順は順序立てて記載
+5. 重要ポイントは段落を分けて明確化
+
+【出力形式】
+### {query}
+[概要の段落]
+
+[詳細内容の段落1]
+
+[詳細内容の段落2]
+
+...このような形式で整理してください。
+
+## 重要
+- 検索結果に書かれていないことを勝手に追加しないでください。
+- 一般的な知識や推測は含めないでください。検索結果に基づく内容のみを記載してください。
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[
+                {"role": "system", "content": "あなたは防災マニュアルの要約専門家です。検索結果を段落で構造化し、実務で即座に参照できる形に整理してください。"},
+                {"role": "user", "content": summary_prompt}
+            ]
+        )
+
+        summarized_content = response.choices[0].message.content
+
         current_knowledge = ""
         if knowledge_path.exists():
             current_knowledge = knowledge_path.read_text(encoding='utf-8')
 
-        new_entry = f"\n\n## 【検索内容】{query}\n{search_result}"
-        updated_knowledge = current_knowledge + new_entry
+        # 【マニュアルからの知識】セクションが既に存在するか確認
+        manual_section_marker = "## 【マニュアルからの知識】"
+        if manual_section_marker in current_knowledge:
+            # 既存のセクションに追加
+            updated_knowledge = current_knowledge + f"\n\n{summarized_content}"
+        else:
+            # 新規セクション作成
+            updated_knowledge = current_knowledge + f"\n\n{manual_section_marker}\n\n{summarized_content}"
+
         knowledge_path.write_text(updated_knowledge, encoding='utf-8')
 
-        # print(f"aiエージェントの記憶に追加しました: 【検索】{query}")
+        # print(f"aiエージェントの記憶に追加しました: 【マニュアル】{query}")
         return True
 
     except Exception as e:
@@ -71,14 +121,22 @@ def search_and_summarize(
     conversation_history: List[Dict[str, str]] = None,
     knowledge_path: Optional[Path] = None
 ) -> str:
+    import threading
+
     # 検索実行
     doc_content = rag_read(query)
 
-    # 知識ベースに保存
+    # 知識ベースへの保存を非同期で実行
     if knowledge_path:
-        add_search_to_knowledge(query, doc_content, knowledge_path)
+        # バックグラウンドで知識保存を実行
+        save_thread = threading.Thread(
+            target=add_search_to_knowledge,
+            args=(query, doc_content, knowledge_path)
+        )
+        save_thread.daemon = True
+        save_thread.start()
 
-    # OpenAI APIで要約
+    # OpenAI APIで要約（ユーザーへの応答生成）
     try:
         client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
 
