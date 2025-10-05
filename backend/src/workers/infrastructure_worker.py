@@ -1,23 +1,15 @@
-import csv
 from typing import Dict, Any
 from pathlib import Path
 from .base_worker import BaseWorker
-from openai import OpenAI
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
-from csv_operations import update_csv_from_knowledge
 
 
 class InfrastructureWorker(BaseWorker):
     """建物・産業・土木対策専門ワーカー（全機能対応）"""
 
     def __init__(self, worker_name: str, manager, time_manager):
-        # 建物・産業・土木対策の実行機能
+        # 建物・産業・土木対策の実行機能（汎用統合ツール）
         available_functions = [
-            "inspect_damage",
-            "secure_road",
-            "emergency_restoration",
-            "handle_debris"
+            "execute_infrastructure_task"
         ]
 
         super().__init__(
@@ -37,204 +29,46 @@ class InfrastructureWorker(BaseWorker):
         return super().start_task(task_description, task_data)
 
     def execute_task(self) -> Dict[str, Any]:
-        """建物・産業・土木対策関連タスクを実行"""
+        """建物・産業・土木対策関連タスクを実行（汎用統合ツール）"""
         if not self.task_data:
             return {"success": False, "message": "タスクデータがありません"}
 
-        function_name = self.task_data.get("function")
-
-        # 被害調査
-        if function_name == "inspect_damage":
-            return self._inspect_damage()
-
-        # 道路確保作業
-        elif function_name == "secure_road":
-            return self._secure_road()
-
-        # 応急復旧作業
-        elif function_name == "emergency_restoration":
-            return self._emergency_restoration()
-
-        # 廃棄物処理作業
-        elif function_name == "handle_debris":
-            return self._handle_debris()
-
-        else:
-            return {"success": False, "message": f"未対応の機能: {function_name}"}
-
-    def _inspect_damage(self) -> Dict[str, Any]:
-        """被害調査を実行"""
+        # タスクの詳細を取得
+        task_type = self.task_data.get("task_type", "作業")
         location = self.task_data.get("location", "")
+        details = self.task_data.get("details", "")
         facility_type = self.task_data.get("facility_type", "")
 
         try:
-            # 調査結果をシミュレート
-            import random
-            damage_levels = ["軽微", "中程度", "重大", "倒壊危険"]
-            damage_level = random.choice(damage_levels)
+            # LLMにタスク実行報告を生成してもらう
+            prompt = f"""
+あなたは土木ワーカー「{self.worker_name}」です。以下のタスクを実施しました。
 
-            # 調査記録を追加
-            update_csv_from_knowledge(
-                update_spec={
-                    "filename": "被害調査報告.csv",
-                    "append_rows": [
-                        {
-                            "objects": [
-                                {
-                                    "調査日時": self.time_manager.get_current_time(),
-                                    "場所": location,
-                                    "施設種別": facility_type,
-                                    "被害程度": damage_level,
-                                    "被害詳細": f"{facility_type}の被害状況を確認",
-                                    "調査者": self.worker_name,
-                                    "対応状況": "調査完了",
-                                    "備考": "詳細評価実施済み"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                knowledge_path=str(self.knowledge_path),
-                time_manager=self.time_manager
+タスク種別: {task_type}
+場所: {location}
+{f'施設種別: {facility_type}' if facility_type else ''}
+詳細: {details}
+
+タスクの実行結果を報告してください。
+- 被害調査の場合: 被害程度（軽微/中程度/重大/倒壊危険）、具体的な被害状況、必要な対応
+- 復旧作業の場合: 作業内容、完了状況、残作業
+- その他: 実施内容と結果
+
+報告は1-2文で簡潔に、具体的に。
+"""
+            response = self.manager.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}]
             )
+
+            report = response.choices[0].message.content
 
             return {
                 "success": True,
-                "message": f"{location}の{facility_type}調査が完了しました。被害程度: {damage_level}",
-                "details": {
-                    "location": location,
-                    "facility_type": facility_type,
-                    "damage_level": damage_level,
-                    "status": "調査完了"
-                }
+                "message": report
             }
         except Exception as e:
-            return {"success": False, "message": f"被害調査エラー: {e}"}
-
-    def _secure_road(self) -> Dict[str, Any]:
-        """道路確保作業を実行"""
-        location = self.task_data.get("location", "")
-
-        try:
-            # 作業記録を追加
-            update_csv_from_knowledge(
-                update_spec={
-                    "filename": "復旧作業記録.csv",
-                    "append_rows": [
-                        {
-                            "objects": [
-                                {
-                                    "作業日時": self.time_manager.get_current_time(),
-                                    "場所": location,
-                                    "作業種別": "道路啓開",
-                                    "作業内容": "がれき撤去・道路確保",
-                                    "作業者": self.worker_name,
-                                    "完了状況": "完了",
-                                    "備考": "緊急車両通行可能"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                knowledge_path=str(self.knowledge_path),
-                time_manager=self.time_manager
-            )
-
-            return {
-                "success": True,
-                "message": f"{location}の道路確保作業が完了しました。緊急車両の通行が可能になりました。",
-                "details": {
-                    "location": location,
-                    "work_type": "道路啓開",
-                    "status": "完了"
-                }
-            }
-        except Exception as e:
-            return {"success": False, "message": f"道路確保作業エラー: {e}"}
-
-    def _emergency_restoration(self) -> Dict[str, Any]:
-        """応急復旧作業を実行"""
-        location = self.task_data.get("location", "")
-        work_type = self.task_data.get("work_type", "")
-
-        try:
-            # 作業記録を追加
-            update_csv_from_knowledge(
-                update_spec={
-                    "filename": "復旧作業記録.csv",
-                    "append_rows": [
-                        {
-                            "objects": [
-                                {
-                                    "作業日時": self.time_manager.get_current_time(),
-                                    "場所": location,
-                                    "作業種別": "応急復旧",
-                                    "作業内容": work_type,
-                                    "作業者": self.worker_name,
-                                    "完了状況": "完了",
-                                    "備考": "応急措置済み"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                knowledge_path=str(self.knowledge_path),
-                time_manager=self.time_manager
-            )
-
-            return {
-                "success": True,
-                "message": f"{location}の{work_type}応急復旧作業が完了しました。",
-                "details": {
-                    "location": location,
-                    "work_type": work_type,
-                    "status": "応急措置完了"
-                }
-            }
-        except Exception as e:
-            return {"success": False, "message": f"応急復旧作業エラー: {e}"}
-
-    def _handle_debris(self) -> Dict[str, Any]:
-        """廃棄物処理作業を実行"""
-        location = self.task_data.get("location", "")
-        debris_type = self.task_data.get("debris_type", "")
-
-        try:
-            # 作業記録を追加
-            update_csv_from_knowledge(
-                update_spec={
-                    "filename": "復旧作業記録.csv",
-                    "append_rows": [
-                        {
-                            "objects": [
-                                {
-                                    "作業日時": self.time_manager.get_current_time(),
-                                    "場所": location,
-                                    "作業種別": "廃棄物処理",
-                                    "作業内容": f"{debris_type}の撤去・処理",
-                                    "作業者": self.worker_name,
-                                    "完了状況": "完了",
-                                    "備考": "一時集積場へ搬送"
-                                }
-                            ]
-                        }
-                    ]
-                },
-                knowledge_path=str(self.knowledge_path),
-                time_manager=self.time_manager
-            )
-
-            return {
-                "success": True,
-                "message": f"{location}の{debris_type}処理が完了しました。一時集積場へ搬送しました。",
-                "details": {
-                    "location": location,
-                    "debris_type": debris_type,
-                    "status": "処理完了"
-                }
-            }
-        except Exception as e:
-            return {"success": False, "message": f"廃棄物処理作業エラー: {e}"}
+            return {"success": False, "message": f"タスク実行エラー: {e}"}
 
     def complete_task(self) -> Dict[str, Any]:
         """タスクを完了し、結果を返す（BaseWorkerをオーバーライド）"""
@@ -251,12 +85,7 @@ class InfrastructureWorker(BaseWorker):
             self.manager.manager.add_message("user", self.worker_name, worker_report, "infrastructure",
                                             from_person=self.worker_name, to_person="infrastructure_manager")
 
-        # マネージャーから感謝メッセージを生成して追加
-        if hasattr(self.manager, '_generate_thank_you_message'):
-            thank_you_message = self.manager._generate_thank_you_message(self.worker_name, worker_report)
-            if hasattr(self.manager, 'manager') and hasattr(self.manager.manager, 'add_message'):
-                self.manager.manager.add_message("assistant", "infrastructure_manager", thank_you_message, "infrastructure",
-                                                from_person="infrastructure_manager", to_person=self.worker_name)
+        # Managerの_process_worker_reportが感謝メッセージとCSV記録を処理する
 
         # タスク状態をリセット
         self.is_busy = False
@@ -305,27 +134,3 @@ class InfrastructureWorker(BaseWorker):
             else:
                 return f"{self.worker_name}です。{self.current_task}で問題が発生しました。{task_result.get('message', '')}"
 
-    def _generate_thank_you_message(self, worker_name: str, worker_report: str) -> str:
-        """ワーカーの完了報告に対するマネージャーの感謝メッセージを生成"""
-        try:
-            client = self.manager.client
-
-            thank_you_prompt = f"""
-あなたはinfrastructure_managerです。{worker_name}から以下の完了報告を受けました。
-
-ワーカーからの報告:
-{worker_report}
-
-{worker_name}に対して、感謝の気持ちを表す短いメッセージを作成してください。
-上司が部下の報告に対して返事をする感じで、簡潔に「ありがとう」的な内容を。
-"""
-
-            response = client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[{"role": "user", "content": thank_you_prompt}]
-            )
-
-            return response.choices[0].message.content
-
-        except Exception:
-            return f"{worker_name}、お疲れ様でした。ありがとう。"

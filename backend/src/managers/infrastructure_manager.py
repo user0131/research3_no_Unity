@@ -1,8 +1,7 @@
 import json
-import csv
-import shutil
 import sys
-from typing import List, Dict, Optional, Tuple, Any
+import csv
+from typing import List, Dict, Optional, Any
 from pathlib import Path
 from datetime import datetime, timedelta
 from openai import OpenAI
@@ -26,12 +25,8 @@ class InfrastructureManager:
         self.pending_inspection = None
         self.pending_restoration = None
 
-        # CSVファイルのパス（infrastructureフォルダ内）
-        self.damage_report_path = Path("./csv/infrastructure/被害調査報告.csv")
-        self.restoration_log_path = Path("./csv/infrastructure/復旧作業記録.csv")
-
-        # 初期化時にCSVを作成
-        self._initialize_infrastructure()
+        # 知識ファイルのパス
+        self.knowledge_path = Path("./src/knowledge/knowledge_infrastructure.txt")
 
         # 調査ツールを初期化
         self.inspection_tool = InfrastructureInspectionTool(time_manager)
@@ -43,24 +38,6 @@ class InfrastructureManager:
             "worker_c": InfrastructureWorker("土木ワーカーC", self, time_manager)
         }
 
-    def _initialize_infrastructure(self):
-        """初期CSVデータを作成"""
-        # csvディレクトリが存在しない場合は作成
-        self.damage_report_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # 被害調査報告CSVが存在しない場合は作成
-        if not self.damage_report_path.exists():
-            with open(self.damage_report_path, 'w', encoding='utf-8', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['施設種別', '被害程度', '被害詳細', '対応状況', '備考'])
-            print(f"被害調査報告.csvを作成しました")
-
-        # 復旧作業記録CSVが存在しない場合は作成
-        if not self.restoration_log_path.exists():
-            with open(self.restoration_log_path, 'w', encoding='utf-8', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['作業種別', '作業内容', '完了状況', '備考'])
-            print(f"復旧作業記録.csvを作成しました")
 
     def build_system_prompt(self) -> str:
         """システムプロンプトを構築"""
@@ -84,8 +61,9 @@ class InfrastructureManager:
   - **道路確保**: secure_roadツールを使用（道路啓開・確保作業）
   - **応急復旧**: emergency_restorationツールを使用（応急復旧作業）
   - **廃棄物処理**: handle_debrisツールを使用（災害廃棄物等処理）
-  - **調査記録確認**: show_damage_reportツールを使用（被害調査記録の確認）
-  - **復旧記録確認**: show_restoration_logツールを使用（復旧作業記録の確認）
+  - **調査記録確認**: show_damage_reportツールを使用（被害調査記録の確認、確認系なので即座に実行）
+  - **復旧記録確認**: show_restoration_logツールを使用（復旧作業記録の確認、確認系なので即座に実行）
+  - **CSV更新**: update_csv_from_knowledgeツールを使用（CSVファイルの更新、確認系なので即座に実行）
 - **ワーカー情報の非開示**: ワーカーA、ワーカーB、ワーカーCといった具体的なワーカー名や、誰が作業をするかの詳細をPlayerに伝える必要はありません。あなたが内部的に判断して「手配します」「対応します」のように伝えてください。
 
 ## 重要
@@ -204,18 +182,13 @@ Playerに対しては「手配します」「対応します」のように、�
         elif tool_name == "show_restoration_log":
             return self._execute_manager_task("show_restoration_log", args)
 
-        # 実行系（ワーカー指定可能）
-        elif tool_name == "inspect_damage":
-            return self._handle_task_assignment("inspect_damage", args)
+        # 実行系（汎用統合ツール）
+        elif tool_name == "execute_infrastructure_task":
+            return self._handle_task_assignment("execute_infrastructure_task", args)
 
-        elif tool_name == "secure_road":
-            return self._handle_task_assignment("secure_road", args)
-
-        elif tool_name == "emergency_restoration":
-            return self._handle_task_assignment("emergency_restoration", args)
-
-        elif tool_name == "handle_debris":
-            return self._handle_task_assignment("handle_debris", args)
+        # CSV更新（マネージャー専用）
+        elif tool_name == "update_csv_from_knowledge":
+            return self._execute_manager_task("update_csv_from_knowledge", args)
 
         else:
             return "未対応のツールが呼ばれました。"
@@ -245,6 +218,12 @@ Playerに対しては「手配します」「対応します」のように、�
 
         if worker.is_busy:
             return f"{worker_name}は現在作業中です。他のワーカーを選択するか、マネージャー自身で実行してください。"
+
+        # Playerにタスク依頼前のメッセージを送信
+        player_notification = self._generate_player_notification(worker_name, function_name, args)
+        if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+            self.manager.add_message("assistant", "infrastructure_manager", player_notification, "infrastructure",
+                                   from_person="infrastructure_manager", to_person="Player")
 
         # マネージャーからワーカーへの指示を会話履歴に追加
         task_instruction = self._generate_task_instruction(worker_name, function_name, args)
@@ -321,6 +300,32 @@ Playerに対しては「手配します」「対応します」のように、�
         except Exception:
             return f"{worker_name}、{function_name}をお願いします。"
 
+    def _generate_player_notification(self, worker_name: str, function_name: str, args: Dict) -> str:
+        """ワーカーにタスクを依頼する前にPlayerに送るメッセージを生成"""
+        try:
+            client = self.client
+
+            notification_prompt = f"""
+あなたはinfrastructure_managerです。Playerから{function_name}の依頼を受けました。
+
+タスク: {function_name}
+場所: {args.get('location', '')}
+
+Playerに対して、依頼を受諾することを簡潔に返答してください。
+- 「承知しました」「了解しました」「手配します」のような簡潔な受諾の返事
+- 話し言葉で、短く簡潔に
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": notification_prompt}]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception:
+            return "部下に作業を依頼します。"
+
     def _generate_task_acceptance(self, worker_name: str, function_name: str, args: Dict) -> str:
         """ワーカーからマネージャーへのタスク承諾を生成"""
         try:
@@ -348,9 +353,10 @@ Playerに対しては「手配します」「対応します」のように、�
 
     def _execute_manager_task(self, function_name: str, args: Dict) -> str:
         """マネージャー自身がタスクを実行"""
-        if function_name == "inspect_damage":
-            self.pending_inspection = args
-            return self.execute_task_with_delay("被害調査", args)
+        if function_name == "execute_infrastructure_task":
+            task_type = args.get("task_type", "作業")
+            self.pending_task = args
+            return self.execute_task_with_delay(task_type, args)
 
         elif function_name == "show_damage_report":
             return self._show_damage_report()
@@ -358,17 +364,15 @@ Playerに対しては「手配します」「対応します」のように、�
         elif function_name == "show_restoration_log":
             return self._show_restoration_log()
 
-        elif function_name == "secure_road":
-            self.pending_inspection = args
-            return self.execute_task_with_delay("道路確保作業", args)
-
-        elif function_name == "emergency_restoration":
-            self.pending_restoration = args
-            return self.execute_task_with_delay("応急復旧作業", args)
-
-        elif function_name == "handle_debris":
-            self.pending_restoration = args
-            return self.execute_task_with_delay("廃棄物処理作業", args)
+        elif function_name == "update_csv_from_knowledge":
+            # information_managerと同じ処理
+            from src.csv_operations import update_csv_from_knowledge
+            result = update_csv_from_knowledge(
+                **args,
+                knowledge_path=str(self.knowledge_path),
+                time_manager=self.time_manager
+            )
+            return "CSVを更新しました。"
 
         return "マネージャーが実行できないタスクです。"
 
@@ -406,6 +410,12 @@ Playerに対しては「手配します」「対応します」のように、�
 
     def execute_task_with_delay(self, task_name: str, args: Dict = None) -> str:
         """タスクを実行し、2分後の戻り時刻を設定"""
+        # Playerにタスク開始前のメッセージを送信
+        if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+            player_notification = f"{task_name}に行ってきます。"
+            self.manager.add_message("assistant", "infrastructure_manager", player_notification, "infrastructure",
+                                   from_person="infrastructure_manager", to_person="Player")
+
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
         return_time = current_time + timedelta(minutes=2)
         self.away_until_time = return_time.strftime("%H:%M")
@@ -476,11 +486,97 @@ Playerに対しては「手配します」「対応します」のように、�
             return f"よし、私の{task_name}完了。"
 
     def _process_worker_report(self, worker_name: str, worker_report: str) -> str:
-        """Workerの完了報告を処理"""
+        """Workerの完了報告を処理（感謝→CSV記録→Player報告）"""
         try:
             client = self.client
 
-            process_prompt = f"""
+            # 1. ワーカーへの感謝メッセージ生成
+            thanks_prompt = f"""
+あなたはinfrastructure_managerです。{worker_name}から作業完了の報告を受けました。
+
+報告内容: {worker_report}
+
+{worker_name}に対して、感謝の気持ちを表す短いメッセージを作成してください。
+「お疲れ様」「ありがとう」のような簡潔な感謝の言葉で。
+"""
+            thanks_response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": thanks_prompt}]
+            )
+            thanks_message = thanks_response.choices[0].message.content
+
+            # ワーカーへの感謝を会話履歴に追加
+            if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+                self.manager.add_message("assistant", "infrastructure_manager", thanks_message, "infrastructure", from_person="infrastructure_manager", to_person=worker_name)
+
+            # 2. CSV記録用のデータ生成とCSV振り分け（LLMで判定）
+            csv_prompt = f"""
+以下のワーカー報告から、適切なCSVファイルに記録すべき情報を判定してください。
+
+報告内容: {worker_report}
+報告者: {worker_name}
+現在時刻: {self.time_manager.get_current_time()}
+
+# 振り分けルール:
+- 道路、橋梁、トンネルの被害 → 道路被害状況.csv
+- 電気、ガス、水道、通信の被害 → ライフライン被害状況.csv
+- 復旧作業、応急処置、撤去作業 → 復旧作業記録.csv
+- 鉄道、バスの運行状況 → 交通機関運行状況.csv
+
+以下のJSON形式で出力してください（JSONのみ、説明不要）：
+{{
+  "csv_type": "道路被害状況|ライフライン被害状況|復旧作業記録|交通機関運行状況",
+  "data": {{
+    // csv_typeに応じた適切なフィールド
+  }}
+}}
+
+例:
+道路被害状況の場合: {{"場所": "...", "道路名": "...", "被害内容": "...", "規制状況": "...", "備考": "..."}}
+ライフライン被害状況の場合: {{"種別": "...", "地域": "...", "被害内容": "...", "対応状況": "...", "復旧予定": "...", "備考": "..."}}
+復旧作業記録の場合: {{"作業種別": "...", "作業内容": "...", "完了状況": "...", "備考": "..."}}
+交通機関運行状況の場合: {{"交通機関": "...", "路線名": "...", "運行状況": "...", "影響区間": "...", "備考": "..."}}
+"""
+            csv_response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": csv_prompt}]
+            )
+
+            # CSV記録を実行
+            try:
+                import json
+                csv_data = json.loads(csv_response.choices[0].message.content)
+                csv_type = csv_data.get("csv_type")
+                data = csv_data.get("data", {})
+
+                # CSVファイル名のマッピング
+                csv_mapping = {
+                    "道路被害状況": "道路被害状況.csv",
+                    "ライフライン被害状況": "ライフライン被害状況.csv",
+                    "復旧作業記録": "復旧作業記録.csv",
+                    "交通機関運行状況": "交通機関運行状況.csv"
+                }
+
+                if csv_type in csv_mapping:
+                    from src.csv_operations import update_csv_from_knowledge
+                    update_spec = {
+                        "filename": csv_mapping[csv_type],
+                        "append_rows": [{
+                            "objects": [data]
+                        }]
+                    }
+
+                    update_csv_from_knowledge(
+                        instruction=f"{worker_name}の作業完了を記録",
+                        update_spec=update_spec,
+                        knowledge_path=str(self.knowledge_path),
+                        time_manager=self.time_manager
+                    )
+            except Exception as e:
+                print(f"CSV記録エラー: {e}")
+
+            # 3. Playerへの報告メッセージ生成
+            player_prompt = f"""
 あなたはinfrastructure_managerです。{worker_name}から作業完了の報告を受けました。
 
 報告内容: {worker_report}
@@ -488,13 +584,12 @@ Playerに対しては「手配します」「対応します」のように、�
 Playerに対して、この作業完了を報告する簡潔なメッセージを作成してください。
 話し言葉で、短く簡潔に。
 """
-
-            response = client.chat.completions.create(
+            player_response = client.chat.completions.create(
                 model="gpt-5-mini",
-                messages=[{"role": "user", "content": process_prompt}]
+                messages=[{"role": "user", "content": player_prompt}]
             )
 
-            return response.choices[0].message.content
+            return player_response.choices[0].message.content
 
         except Exception:
             return f"{worker_name}の作業が完了しました。"
@@ -503,73 +598,25 @@ Playerに対して、この作業完了を報告する簡潔なメッセージ�
         """Function calling用の定義を取得"""
         defs = []
 
-        # 現場確認（ワーカー指定可能）
+        # 土木作業実施（汎用統合ツール）
         defs.append({
             "type": "function",
             "function": {
-                "name": "inspect_damage",
-                "description": "道路、橋りょう、公園、河川等の土木施設の被害調査を行う。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
+                "name": "execute_infrastructure_task",
+                "description": "土木インフラ関連の作業全般を実施する汎用ツール。被害調査、道路確保、応急復旧、廃棄物処理、その他の土木作業を実施。会話履歴から空いているワーカーを判断してタスクを依頼する。",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "location": {"type": "string", "description": "調査場所"},
-                        "facility_type": {"type": "string", "description": "施設種別（道路、橋、公園、河川、土砂災害危険箇所等）"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["土木ワーカーA", "土木ワーカーB", "土木ワーカーC", "マネージャー自身"]}
-                    },
-                    "required": ["location", "facility_type", "assigned_worker"]
-                }
-            }
-        })
-
-        # 道路確保（ワーカー指定可能）
-        defs.append({
-            "type": "function",
-            "function": {
-                "name": "secure_road",
-                "description": "道路啓開・確保作業を実施する。重要：現場確認後にのみ使用。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
+                        "task_type": {"type": "string", "description": "作業種別（例：被害調査、道路確保、応急復旧、廃棄物処理、通行規制、安全確認、パトロール等）"},
                         "location": {"type": "string", "description": "作業場所"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["土木ワーカーA", "土木ワーカーB", "土木ワーカーC", "マネージャー自身"]}
+                        "details": {"type": "string", "description": "作業の詳細内容（施設種別、具体的な作業内容、対象物等）"},
+                        "assigned_worker": {
+                            "type": "string",
+                            "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）",
+                            "enum": ["土木ワーカーA", "土木ワーカーB", "土木ワーカーC", "マネージャー自身"]
+                        }
                     },
-                    "required": ["location", "assigned_worker"]
-                }
-            }
-        })
-
-        # 応急復旧（ワーカー指定可能）
-        defs.append({
-            "type": "function",
-            "function": {
-                "name": "emergency_restoration",
-                "description": "土木施設の応急復旧作業を実施する。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "location": {"type": "string", "description": "作業場所"},
-                        "work_type": {"type": "string", "description": "作業種別（道路補修、橋梁応急処置、河川護岸補修等）"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["土木ワーカーA", "土木ワーカーB", "土木ワーカーC", "マネージャー自身"]}
-                    },
-                    "required": ["location", "work_type", "assigned_worker"]
-                }
-            }
-        })
-
-        # 廃棄物処理（ワーカー指定可能）
-        defs.append({
-            "type": "function",
-            "function": {
-                "name": "handle_debris",
-                "description": "災害廃棄物等の処理作業を実施する。",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "location": {"type": "string", "description": "作業場所"},
-                        "debris_type": {"type": "string", "description": "廃棄物種別（がれき、土砂、倒木等）"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["土木ワーカーA", "土木ワーカーB", "土木ワーカーC", "マネージャー自身"]}
-                    },
-                    "required": ["location", "debris_type", "assigned_worker"]
+                    "required": ["task_type", "location", "assigned_worker"]
                 }
             }
         })
@@ -597,6 +644,59 @@ Playerに対して、この作業完了を報告する簡潔なメッセージ�
                 "parameters": {
                     "type": "object",
                     "properties": {},
+                    "required": []
+                }
+            }
+        })
+
+        # CSV更新
+        defs.append({
+            "type": "function",
+            "function": {
+                "name": "update_csv_from_knowledge",
+                "description": "CSVファイルの更新専用ツール。CSVファイルに記録を追加したり更新する場合のみ使用。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "instruction": {
+                            "type": "string",
+                            "description": "自然文の、csvの更新に関する指示。"
+                        },
+                        "update_spec": {
+                            "type": "object",
+                            "description": "更新計画（任意）。指定しない場合はinstructionからLLMが自動生成。",
+                            "properties": {
+                                "filename": {"type": "string", "description": "更新対象CSVファイル名"},
+                                "append_rows": {
+                                    "type": "array",
+                                    "description": "追加する行データの配列",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "objects": {
+                                                "type": "array",
+                                                "description": "実際の行データの配列",
+                                                "items": {"type": "object"}
+                                            }
+                                        },
+                                        "required": ["objects"]
+                                    }
+                                },
+                                "update_cells": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "row_index": {"type": "integer"},
+                                            "column": {"type": "string"},
+                                            "value": {"description": "書き込む値"}
+                                        },
+                                        "required": ["row_index", "column", "value"]
+                                    }
+                                }
+                            }
+                        }
+                    },
                     "required": []
                 }
             }
@@ -840,7 +940,7 @@ Playerに対して、これらのタスクの手配が完了したことを報�
             # 複数のツール結果を処理
             if tool_results:
                 # 確認系と実行系が混在する可能性があるため、適切に処理
-                has_confirmation_tools = any(tr["function_name"] in ["show_damage_report", "show_restoration_log"] for tr in tool_results)
+                has_confirmation_tools = any(tr["function_name"] in ["show_damage_report", "show_restoration_log", "update_csv_from_knowledge"] for tr in tool_results)
                 has_execution_tools = any(tr["function_name"] in ["inspect_damage", "secure_road", "emergency_restoration", "handle_debris"] for tr in tool_results)
 
                 if has_execution_tools:
