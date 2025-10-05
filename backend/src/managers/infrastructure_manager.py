@@ -534,11 +534,11 @@ Playerに対して、依頼を受諾することを簡潔に返答してくだ�
 }}
 
 例:
-道路被害状況の場合: {{"場所": "...", "道路名": "...", "被害内容": "...", "規制状況": "...", "備考": "..."}}
-ライフライン被害状況の場合: {{"種別": "...", "地域": "...", "被害内容": "...", "対応状況": "...", "復旧予定": "...", "備考": "..."}}
+道路被害状況の場合: {{"場所": "...", "道路名": "...", "被害内容": "...", "規制状況": "...", "報告者": "{worker_name}", "報告日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
+ライフライン被害状況の場合: {{"種別": "...", "地域": "...", "被害内容": "...", "対応状況": "...", "復旧予定": "...", "報告者": "{worker_name}", "報告日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
 公共施設被害状況の場合: {{"施設名": "...", "施設種別": "...", "被害内容": "...", "被害程度": "...", "対応状況": "...", "調査者": "{worker_name}", "調査日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
-復旧作業記録の場合: {{"作業種別": "...", "作業内容": "...", "完了状況": "...", "備考": "..."}}
-交通機関運行状況の場合: {{"交通機関": "...", "路線名": "...", "運行状況": "...", "影響区間": "...", "備考": "..."}}
+復旧作業記録の場合: {{"作業種別": "...", "作業内容": "...", "完了状況": "...", "報告者": "{worker_name}", "報告日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
+交通機関運行状況の場合: {{"交通機関": "...", "路線名": "...", "運行状況": "...", "影響区間": "...", "報告者": "{worker_name}", "報告日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
 """
             csv_response = client.chat.completions.create(
                 model="gpt-5-mini",
@@ -980,6 +980,8 @@ Playerに対して、これらのタスクの手配が完了したことを報�
                 info_summary = []
                 for info in info_data:
                     info_summary.append(f"・{info.subject}: {info.content}")
+                    # 各情報をCSVに記録
+                    self._record_system_info_to_csv(info.subject, info.content, source)
                 info_text = "\n".join(info_summary)
 
                 prompt = f"""
@@ -995,6 +997,8 @@ Playerに対して、これらのタスクの手配が完了したことを報�
             else:
                 # 単一の情報の場合（従来通り）
                 subject, content = info_data
+                # システム情報をCSVに記録
+                self._record_system_info_to_csv(subject, content, source)
                 prompt = f"""
 あなたはinfrastructure_managerです。{source}から以下の情報を受け取りました。
 
@@ -1016,3 +1020,80 @@ Playerに対して、これらのタスクの手配が完了したことを報�
 
         except Exception as e:
             return f"{source}から情報を受け取りました。対応について指示をお願いします。"
+
+    def _record_system_info_to_csv(self, subject: str, content: str, source: str):
+        """systemからの情報をCSVに記録"""
+        try:
+            client = self.client
+            # LLMでCSV振り分けを判定
+            csv_prompt = f"""
+以下のシステム情報から、適切なCSVファイルに記録すべき情報を判定してください。
+件名: {subject}
+内容: {content}
+情報源: {source}
+現在時刻: {self.time_manager.get_current_time()}
+
+# 振り分けルール:
+- 道路、橋梁、トンネルの被害 → 道路被害状況.csv
+- 電気、ガス、水道、通信の被害 → ライフライン被害状況.csv
+- 学校、公園、公共建物などの公共施設の被害調査 → 公共施設被害状況.csv
+- 実際の復旧作業、応急処置、撤去作業 → 復旧作業記録.csv（被害調査は含まない）
+- 鉄道、バスの運行状況 → 交通機関運行状況.csv
+
+以下のJSON形式で出力してください（JSONのみ、説明不要）：
+{{
+  "csv_type": "道路被害状況|ライフライン被害状況|公共施設被害状況|復旧作業記録|交通機関運行状況",
+  "data": {{
+    // csv_typeに応じた適切なフィールド
+  }}
+}}
+
+例:
+道路被害状況の場合: {{"場所": "...", "道路名": "...", "被害内容": "...", "規制状況": "...", "報告者": "{source}", "報告日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
+ライフライン被害状況の場合: {{"種別": "...", "地域": "...", "被害内容": "...", "対応状況": "...", "復旧予定": "...", "報告者": "{source}", "報告日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
+公共施設被害状況の場合: {{"施設名": "...", "施設種別": "...", "被害内容": "...", "被害程度": "...", "対応状況": "...", "調査者": "{source}", "調査日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
+復旧作業記録の場合: {{"作業種別": "...", "作業内容": "...", "完了状況": "...", "報告者": "{source}", "報告日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
+交通機関運行状況の場合: {{"交通機関": "...", "路線名": "...", "運行状況": "...", "影響区間": "...", "報告者": "{source}", "報告日時": "{self.time_manager.get_current_time()}", "備考": "..."}}
+"""
+            csv_response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": csv_prompt}]
+            )
+
+            # CSV記録を実行
+            try:
+                import json
+                csv_data = json.loads(csv_response.choices[0].message.content)
+                csv_type = csv_data.get("csv_type")
+                data = csv_data.get("data", {})
+
+                # CSVファイル名のマッピング
+                csv_mapping = {
+                    "道路被害状況": "道路被害状況.csv",
+                    "ライフライン被害状況": "ライフライン被害状況.csv",
+                    "公共施設被害状況": "公共施設被害状況.csv",
+                    "復旧作業記録": "復旧作業記録.csv",
+                    "交通機関運行状況": "交通機関運行状況.csv"
+                }
+
+                if csv_type in csv_mapping:
+                    from src.csv_operations import update_csv_from_knowledge
+                    update_spec = {
+                        "filename": csv_mapping[csv_type],
+                        "append_rows": [{
+                            "objects": [data]
+                        }]
+                    }
+                    update_csv_from_knowledge(
+                        instruction=f"{source}からのシステム情報を記録",
+                        update_spec=update_spec,
+                        knowledge_path=str(self.knowledge_path),
+                        time_manager=self.time_manager
+                    )
+            except Exception as e:
+                # CSV記録でエラーが発生しても処理を継続
+                pass
+
+        except Exception as e:
+            # システム情報のCSV記録でエラーが発生しても処理を継続
+            pass
