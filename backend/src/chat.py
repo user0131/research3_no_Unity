@@ -288,14 +288,54 @@ class ChatWithMemory:
 
         infos = self.inf_provider.check_scheduled_infos()
         if infos:
+            # 付与先とソース別にグループ化
+            from collections import defaultdict
+            grouped_infos = defaultdict(list)
+
             for info in infos:
-                print(f"\n【情報付与】付与元: {info.source} | 件名: {info.subject}")
+                print(f"\n【情報付与】付与元: {info.source} | 件名: {info.subject} | 付与先: {info.target_team}")
                 print(f"   {info.content}")
 
                 # 会話ログにsystemメッセージとして追加
                 system_message = f"【情報付与】{info.source}: {info.subject}\n{info.content}"
-                # 情報管理班全体への通知（PlayerとInformation Managerの両方が見れる）
-                self.add_message("system", "System", system_message, "information", from_person="System", to_person="information_team")
+
+                # 付与先に応じて適切なマネージャータイプと宛先を決定
+                if info.target_team == "supply_team":
+                    manager_type = "supply"
+                    to_person = "supply_manager"
+                elif info.target_team == "infrastructure_team":
+                    manager_type = "infrastructure"
+                    to_person = "infrastructure_manager"
+                else:  # information_team or default
+                    manager_type = "information"
+                    to_person = "information_team"
+
+                self.add_message("system", "System", system_message, manager_type, from_person="System", to_person=to_person)
+
+                # 付与先とソース別にグループ化（Playerへの報告用）
+                if info.target_team in ["supply_team", "infrastructure_team"]:
+                    key = (info.target_team, info.source)
+                    grouped_infos[key].append(info)
+
+            # グループ化された情報をまとめてPlayerに報告
+            for (target_team, source), info_list in grouped_infos.items():
+                if target_team == "supply_team":
+                    # 複数の場合はリスト、単一の場合はタプルで渡す
+                    if len(info_list) > 1:
+                        manager_response = self.supply_manager.handle_system_information(source, info_list)
+                    else:
+                        info = info_list[0]
+                        manager_response = self.supply_manager.handle_system_information(source, (info.subject, info.content))
+                    self.add_message("assistant", "supply_manager", manager_response, "supply", from_person="supply_manager", to_person="Player")
+                elif target_team == "infrastructure_team":
+                    # 複数の場合はリスト、単一の場合はタプルで渡す
+                    if len(info_list) > 1:
+                        manager_response = self.infrastructure_manager.handle_system_information(source, info_list)
+                    else:
+                        info = info_list[0]
+                        manager_response = self.infrastructure_manager.handle_system_information(source, (info.subject, info.content))
+                    self.add_message("assistant", "infrastructure_manager", manager_response, "infrastructure", from_person="infrastructure_manager", to_person="Player")
+
             print()
         return len(infos) > 0
 

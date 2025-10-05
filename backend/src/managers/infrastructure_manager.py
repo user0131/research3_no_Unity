@@ -964,3 +964,51 @@ Playerに対して、これらのタスクの手配が完了したことを報�
             assistant_message = response_message.content if response_message.content else ""
 
         return assistant_message, "infrastructure_manager"
+
+    def handle_system_information(self, source: str, info_data) -> str:
+        """情報を受け取り、Playerに報告と指示要請を生成（単一・複数対応）"""
+        try:
+            client = self.client
+
+            # info_dataが文字列（単一）かリスト（複数）かを判定
+            if isinstance(info_data, list):
+                # 複数の情報の場合
+                info_summary = []
+                for info in info_data:
+                    info_summary.append(f"・{info.subject}: {info.content}")
+                info_text = "\n".join(info_summary)
+
+                prompt = f"""
+あなたはinfrastructure_managerです。{source}から複数の情報を受け取りました。
+
+{info_text}
+
+これらの情報をPlayerに報告してください。
+- 情報の要点を簡潔に伝える
+- 指示要請や対応案は含めない
+- 話し言葉で、自然に
+"""
+            else:
+                # 単一の情報の場合（従来通り）
+                subject, content = info_data
+                prompt = f"""
+あなたはinfrastructure_managerです。{source}から以下の情報を受け取りました。
+
+件名: {subject}
+内容: {content}
+
+この情報をPlayerに報告してください。
+- 情報の要点を簡潔に伝える
+- 指示要請や対応案は含めない
+- 話し言葉で、自然に
+"""
+
+            response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            return response.choices[0].message.content
+
+        except Exception as e:
+            return f"{source}から情報を受け取りました。対応について指示をお願いします。"

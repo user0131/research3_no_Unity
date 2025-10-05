@@ -13,6 +13,7 @@ class ScheduledInfo(BaseModel):
     source: str  # 付与元
     subject: str  # 件名
     content: str  # 付与内容
+    target_team: str = "information_team"  # 付与先
     delivered: bool = False  # 配信済みフラグ
 
 
@@ -46,7 +47,8 @@ class InfProvider:
                             time_str=row['付与時間'],
                             source=row['付与元'],
                             subject=row['件名'],
-                            content=row['付与内容']
+                            content=row['付与内容'],
+                            target_team=row.get('付与先', 'information_team')
                         )
                         # 既存の付与内容と重複しないか確認（二重付与防止）
                         exists = any(

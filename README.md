@@ -35,4 +35,7 @@ TODO 物資管理班のワーカーを、物資管理ワーカーというよう
 - infra系で行ったテスト
 「今何か情報が入っていますか？」確認系のテスト
 
-TODO - informationについて
+TODO - infraのtool系を修正✅
+TODO - informationについて、knowledgeに整形して入れるように変更✅
+
+TODO - 
