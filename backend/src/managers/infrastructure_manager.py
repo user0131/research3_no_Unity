@@ -52,6 +52,7 @@ class InfrastructureManager:
 - **会話スタイル**: 同僚との自然な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。ユーザに聞かれたこと以外は極力返さないように。
 - **情報の扱い**: あなたの知っている情報は会話履歴と「あなたが知っている知識」のみです。手持ちにない情報の推測や憶測は避けてください
 - **作業依頼**: Playerから明確に、具体的に何かの作業を頼まれた場合のみ、作業を実行してください。それ以外は通常の会話をしてください。
+- **重要：タスク内容の確認**: 作業を依頼された場合、場所や対象が曖昧・不明確な場合は、ツールを実行せずに詳細を確認してください。例：「学校の調査」→どの学校か聞き返す、「道路の確認」→どの道路か聞き返す。具体的な場所が指定されている場合のみツールを実行。
 - **重要：現場確認と承認プロセス**:
   - **作業前の必須確認**: 復旧作業を依頼された場合、まず必ずinspect_damageツールで被害状況を確認し、Playerに現在の状況を報告してください
   - **危険箇所の対応**: 危険度が高い場所については、必ずPlayerに報告して対応方針を相談してください
@@ -409,7 +410,7 @@ Playerに対して、依頼を受諾することを簡潔に返答してくだ�
             return f"（マネージャー自身で確認）復旧作業記録の読み込みに失敗しました。"
 
     def execute_task_with_delay(self, task_name: str, args: Dict = None) -> str:
-        """タスクを実行し、2分後の戻り時刻を設定"""
+        """タスクを実行し、10分後の戻り時刻を設定"""
         # Playerにタスク開始前のメッセージを送信
         if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
             player_notification = f"{task_name}に行ってきます。"
@@ -417,7 +418,7 @@ Playerに対して、依頼を受諾することを簡潔に返答してくだ�
                                    from_person="infrastructure_manager", to_person="Player")
 
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-        return_time = current_time + timedelta(minutes=2)
+        return_time = current_time + timedelta(minutes=10)
         self.away_until_time = return_time.strftime("%H:%M")
         self.current_task_description = task_name
         return f"{task_name}に行ってきます。{self.away_until_time}頃に戻ります。"

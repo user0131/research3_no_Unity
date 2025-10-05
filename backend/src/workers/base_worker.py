@@ -31,9 +31,9 @@ class BaseWorker(ABC):
         self.is_busy = True
         self.current_task = task_description
 
-        # タスク完了時刻を設定（2分後）
+        # タスク完了時刻を設定（10分後）
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-        self.task_end_time = current_time + timedelta(minutes=2)
+        self.task_end_time = current_time + timedelta(minutes=10)
 
         return f"{task_description}を開始しました。"
 

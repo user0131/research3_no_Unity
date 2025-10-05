@@ -334,9 +334,9 @@ class InformationManager:
             return "未対応のツールが呼ばれました。"
 
     def execute_task_with_delay(self, task_name: str, args: Dict = None) -> str:
-        """タスクを実行し、2分後の戻り時刻を設定"""
+        """タスクを実行し、10分後の戻り時刻を設定"""
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-        return_time = current_time + timedelta(minutes=2)
+        return_time = current_time + timedelta(minutes=10)
         self.away_until_time = return_time.strftime("%H:%M")
         self.current_task_description = task_name
         return f"{task_name}に行ってきます。{self.away_until_time}頃に戻ります。"

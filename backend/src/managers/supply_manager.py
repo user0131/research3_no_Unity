@@ -77,6 +77,7 @@ class SupplyManager:
 - **会話スタイル**: 同僚との自獨な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。ユーザに聞かれたこと以外は極力返さないように。
 - **情報の扱い**: あなたの知っている情報は会話履歴と「あなたが知っている知識」のみです。手持ちにない情報の推測や憶測は避けてください
 - **作業依頼**: Playerから明確に、具体的に何かの作業を頼まれた場合のみ、作業を実行してください。それ以外は通常の会話をしてください。
+- **重要：タスク内容の確認**: 作業を依頼された場合、場所や対象が曖昧・不明確な場合は、ツールを実行せずに詳細を確認してください。例：「避難所に物資配送」→どの避難所か聞き返す、「水を配送」→どこに・何本か聞き返す。具体的な避難所名・物資名・数量が指定されている場合のみツールを実行。
 - **重要：在庫確認と承認プロセス**:
   - **配送前の必須確認**: 物資配送を依頼された場合、まず必ずcheck_inventoryツールで在庫を確認し、Playerに現在の在庫状況を報告してください
   - **在庫不足時の対応**: 要請数量に対して在庫が不足している場合は、配送を実行せず、Playerに在庫不足を報告して対応方針を相談してください
@@ -586,9 +587,9 @@ Playerに対して、これらの作業を今から実行することを報告�
         return "マネージャーが実行できないタスクです。"
 
     def execute_task_with_delay(self, task_name: str, args: Dict = None) -> str:
-        """タスクを実行し、2分後の戻り時刻を設定"""
+        """タスクを実行し、10分後の戻り時刻を設定"""
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-        return_time = current_time + timedelta(minutes=2)
+        return_time = current_time + timedelta(minutes=10)
         self.away_until_time = return_time.strftime("%H:%M")
         self.current_task_description = task_name
         return f"{task_name}に行ってきます。{self.away_until_time}頃に戻ります。"
