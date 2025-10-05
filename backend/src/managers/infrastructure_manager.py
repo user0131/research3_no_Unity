@@ -967,6 +967,16 @@ Playerに対して、これらのタスクの手配が完了したことを報�
             # 通常の会話応答
             assistant_message = response_message.content if response_message.content else ""
 
+        # Playerからの重要な情報をCSVに記録するかチェック
+        player_message = None
+        for msg in messages:
+            if msg.get("role") == "user" and msg.get("name") == "Player":
+                player_message = msg.get("content", "")
+                break
+
+        if player_message:
+            self._check_and_record_player_info(player_message)
+
         return assistant_message, "infrastructure_manager"
 
     def handle_system_information(self, source: str, info_data) -> str:
@@ -1096,4 +1106,37 @@ Playerに対して、これらのタスクの手配が完了したことを報�
 
         except Exception as e:
             # システム情報のCSV記録でエラーが発生しても処理を継続
+            pass
+
+    def _check_and_record_player_info(self, player_message: str):
+        """Playerからの情報でCSVに記録すべきものがあるかチェックして記録"""
+        try:
+            client = self.client
+            # LLMでPlayerの情報がCSVに記録すべきかを判定
+            check_prompt = f"""
+Playerから以下の情報を受け取りました：
+「{player_message}」
+
+この情報が以下のいずれかに該当し、CSVに記録すべきかを判定してください：
+- 道路、橋梁、トンネルの被害情報
+- 電気、ガス、水道、通信の被害情報
+- 学校、公園、公共建物などの公共施設の被害情報
+- 復旧作業、応急処置、撤去作業の情報
+- 鉄道、バスの運行状況情報
+
+記録すべき場合は「YES」、そうでなければ「NO」のみで回答してください。
+"""
+            check_response = client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": check_prompt}]
+            )
+
+            should_record = check_response.choices[0].message.content.strip().upper()
+
+            if should_record == "YES":
+                # CSV記録を実行
+                self._record_system_info_to_csv("Player報告", player_message, "Player")
+
+        except Exception:
+            # Playerメッセージのチェック・記録でエラーが発生しても処理を継続
             pass
