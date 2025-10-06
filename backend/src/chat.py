@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from managers.information_manager import InformationManager
 from managers.supply_manager import SupplyManager
 from managers.infrastructure_manager import InfrastructureManager
+from managers.mayor_manager import MayorManager
 from inf_provider import InfProvider
 from time_manager import TimeManager
 
@@ -30,21 +31,25 @@ class ChatWithMemory:
         self.info_manager = InformationManager(self.client, self.time_manager)
         self.supply_manager = SupplyManager(self.client, self.time_manager)
         self.infrastructure_manager = InfrastructureManager(self.client, self.time_manager)
+        self.mayor_manager = MayorManager(self.client, self.time_manager)
 
         # マネージャーにChatWithMemoryへの参照を設定
         self.info_manager.manager = self
         self.supply_manager.manager = self
         self.infrastructure_manager.manager = self
+        self.mayor_manager.manager = self
 
         # 会話履歴を分離（マネージャータイプ別）
         self.info_conversation_history: List[Dict[str, str]] = []
         self.supply_conversation_history: List[Dict[str, str]] = []
         self.infrastructure_conversation_history: List[Dict[str, str]] = []
+        self.mayor_conversation_history: List[Dict[str, str]] = []
 
         # 各人物ごとの会話履歴ボックス
         self.person_histories = {
             "Player": [],
             "information_manager": [],
+            "mayor_manager": [],
             "supply_manager": [],
             "infrastructure_manager": [],
             "ワーカーA": [],
@@ -66,6 +71,11 @@ class ChatWithMemory:
             messages.append({"role": "system", "content": self.info_manager.build_system_prompt()})
             # 過去の会話(role付き)を追加
             messages.extend(self.info_conversation_history)
+        elif manager_type == "mayor":
+            # システムプロンプト（MayorManagerから取得）
+            messages.append({"role": "system", "content": self.mayor_manager.build_system_prompt()})
+            # 過去の会話(role付き)を追加
+            messages.extend(self.mayor_conversation_history)
         elif manager_type == "supply":
             # システムプロンプト（SupplyManagerから取得）
             messages.append({"role": "system", "content": self.supply_manager.build_system_prompt()})
@@ -95,6 +105,8 @@ class ChatWithMemory:
                     to_person = "supply_manager"
                 elif manager_type == "infrastructure":
                     to_person = "infrastructure_manager"
+                elif manager_type == "mayor":
+                    to_person = "mayor_manager"
                 else:
                     to_person = "information_manager"
             elif "ワーカー" in name:
@@ -104,7 +116,7 @@ class ChatWithMemory:
                     to_person = "infrastructure_manager"
                 else:
                     to_person = "information_manager"
-            elif name in ["supply_manager", "information_manager", "infrastructure_manager"]:
+            elif name in ["supply_manager", "information_manager", "infrastructure_manager", "mayor_manager"]:
                 to_person = "Player"  # デフォルトはPlayerに報告
             else:
                 to_person = "Player"
@@ -123,6 +135,8 @@ class ChatWithMemory:
 
         if manager_type == "information":
             self.info_conversation_history.append(message)
+        elif manager_type == "mayor":
+            self.mayor_conversation_history.append(message)
         elif manager_type == "supply":
             self.supply_conversation_history.append(message)
         else:  # infrastructure
@@ -138,11 +152,13 @@ class ChatWithMemory:
 
         # 特別な宛先処理（チーム全体への通知）
         if to_person == "information_team":
-            # 情報管理班全体（PlayerとInformation Manager）に追加
+            # 情報管理室全体（Player, Information Manager, Mayor）に追加
             if "Player" in self.person_histories:
                 self.person_histories["Player"].append(message)
             if "information_manager" in self.person_histories:
                 self.person_histories["information_manager"].append(message)
+            if "mayor_manager" in self.person_histories:
+                self.person_histories["mayor_manager"].append(message)
         elif to_person == "supply_team":
             # 物資管理班全体（supply_manager, ワーカーA/B/C）に追加
             supply_team_members = ["supply_manager", "ワーカーA", "ワーカーB", "ワーカーC"]
@@ -162,6 +178,7 @@ class ChatWithMemory:
     def clear_history(self):
         self.conversation_history = []
         self.info_conversation_history = []
+        self.mayor_conversation_history = []
         self.supply_conversation_history = []
         self.infrastructure_conversation_history = []
         # 各人物の会話履歴もクリア
@@ -171,6 +188,8 @@ class ChatWithMemory:
     def get_conversation_history(self, manager_type: str = "all") -> List[Dict[str, str]]:
         if manager_type == "information":
             return self.info_conversation_history.copy()
+        elif manager_type == "mayor":
+            return self.mayor_conversation_history.copy()
         elif manager_type == "supply":
             return self.supply_conversation_history.copy()
         elif manager_type == "infrastructure":
@@ -197,6 +216,9 @@ class ChatWithMemory:
         if user_message.startswith("/information_manager/"):
             manager_type = "information"
             actual_message = user_message[len("/information_manager/"):]
+        elif user_message.startswith("/mayor/"):
+            manager_type = "mayor"
+            actual_message = user_message[len("/mayor/"):]
         elif user_message.startswith("/supply_manager/"):
             manager_type = "supply"
             actual_message = user_message[len("/supply_manager/"):]
@@ -207,6 +229,8 @@ class ChatWithMemory:
         # 対応するマネージャーを選択
         if manager_type == "information":
             current_manager = self.info_manager
+        elif manager_type == "mayor":
+            current_manager = self.mayor_manager
         elif manager_type == "supply":
             current_manager = self.supply_manager
         else:
@@ -279,8 +303,7 @@ class ChatWithMemory:
             self.add_message("user", "infrastructure_manager", message, "infrastructure", from_person="infrastructure_manager", to_person=to_person)
 
         # 会話中のみ情報付与を一時停止（離席中は情報付与継続）
-        # information_managerのみが情報付与を受け取る
-        if self.info_manager.in_conversation or self.supply_manager.in_conversation or self.infrastructure_manager.in_conversation:
+        if self.info_manager.in_conversation or self.mayor_manager.in_conversation or self.supply_manager.in_conversation or self.infrastructure_manager.in_conversation:
             return False
 
         # TimeManagerの時刻をInfProviderに同期

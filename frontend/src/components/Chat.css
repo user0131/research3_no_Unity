@@ -13,11 +13,44 @@
   background-color: #1a1a1a;
   color: #ffffff;
   border-bottom: 2px solid #2196f3;
+  min-height: 70px;
+  box-sizing: border-box;
+}
+
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .chat-header h2 {
   margin: 0;
   font-size: 18px;
+}
+
+.person-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.person-tab {
+  padding: 8px 16px;
+  background-color: transparent;
+  color: #ffffff;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.person-tab:hover {
+  background-color: #333;
+}
+
+.person-tab.active {
+  background-color: #2196f3;
+  border-color: #2196f3;
 }
 
 .current-time {

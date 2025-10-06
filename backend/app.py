@@ -537,6 +537,32 @@ def get_person_info():
             person_info["csv_files"] = csv_files
             person_info["available"] = not manager.away_until_time
 
+        elif person == "mayor_manager":
+            manager = chat.mayor_manager
+            # 知識情報
+            person_info["knowledge"] = manager.get_knowledge()
+            # CSV情報
+            csv_files = []
+            csv_path = Path("./csv/information")
+            if csv_path.exists():
+                for csv_file in csv_path.glob("*.csv"):
+                    try:
+                        import pandas as pd
+                        df = pd.read_csv(csv_file)
+                        csv_files.append({
+                            "name": csv_file.name,
+                            "rows": len(df),
+                            "columns": df.columns.tolist()
+                        })
+                    except:
+                        csv_files.append({
+                            "name": csv_file.name,
+                            "rows": 0,
+                            "columns": []
+                        })
+            person_info["csv_files"] = csv_files
+            person_info["available"] = not manager.away_until_time
+
         elif person == "supply_manager":
             manager = chat.supply_manager
             # 知識情報
@@ -666,7 +692,7 @@ def reset_system():
             # 知識ファイルを初期内容で初期化
             init_knowledge_path = Path("config/init_knowledge")
 
-            for knowledge_file in ["knowledge_information.txt", "knowledge_supply.txt", "knowledge_infrastructure.txt"]:
+            for knowledge_file in ["knowledge_information.txt", "knowledge_supply.txt", "knowledge_infrastructure.txt", "knowledge_mayor.txt"]:
                 init_file_path = init_knowledge_path / knowledge_file
                 target_file_path = knowledge_path / knowledge_file
 
@@ -682,16 +708,21 @@ def reset_system():
                 dept_mappings = {
                     'supply': 'knowledge_supply.txt',
                     'infrastructure': 'knowledge_infrastructure.txt',
-                    'information': 'knowledge_information.txt'
+                    'information': ['knowledge_information.txt', 'knowledge_mayor.txt']
                 }
 
-                for dept, knowledge_file in dept_mappings.items():
+                for dept, knowledge_files in dept_mappings.items():
                     dept_init_path = init_data_path / dept
                     if dept_init_path.exists():
                         for file in dept_init_path.glob("*.csv"):
                             shutil.copy2(file, csv_path / dept / file.name)
                             # 対応する知識ファイルにCSV情報を追加
-                            _add_csv_to_knowledge(file, f"src/knowledge/{knowledge_file}")
+                            if isinstance(knowledge_files, list):
+                                # informationの場合は複数の知識ファイルに追加
+                                for knowledge_file in knowledge_files:
+                                    _add_csv_to_knowledge(file, f"src/knowledge/{knowledge_file}")
+                            else:
+                                _add_csv_to_knowledge(file, f"src/knowledge/{knowledge_files}")
 
         # 新しいチャットインスタンスを作成
         new_chat = get_chat_instance()
