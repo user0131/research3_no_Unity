@@ -197,7 +197,7 @@ def get_managers_status():
 
         # 各マネージャーの状態を取得
         info_status = {
-            "name": "情報管理班",
+            "name": "危機管理室",
             "available": not chat.info_manager.away_from_desk,
             "in_conversation": chat.info_manager.in_conversation,
             "memory": {
@@ -233,10 +233,10 @@ def get_manager_debug_data():
 
         debug_data = {}
 
-        # 情報管理班のデータ
+        # 危機管理室のデータ
         if manager_type in ['all', 'information']:
             info_data = {
-                "name": "情報管理班",
+                "name": "危機管理室",
                 "class": "InformationManager",
                 "status": {
                     "available": not getattr(chat.info_manager, 'away_from_desk', False),
@@ -281,7 +281,7 @@ def get_manager_debug_data():
                 knowledge_files = {}
                 knowledge_path = Path("src/knowledge")
 
-                # 情報管理班専用knowledge
+                # 危機管理室専用knowledge
                 info_knowledge_path = knowledge_path / "knowledge_information.txt"
                 if info_knowledge_path.exists():
                     with open(info_knowledge_path, 'r', encoding='utf-8') as f:
@@ -305,6 +305,9 @@ def get_manager_debug_data():
                         info_data["workers"].append(worker_info)
             except Exception as worker_error:
                 print(f"Worker data error for info_manager: {worker_error}")
+
+            # Person historiesを追加
+            info_data["person_histories"] = chat.person_histories
 
             debug_data["information_manager"] = info_data
 
@@ -464,6 +467,71 @@ def get_manager_debug_data():
 
             debug_data["infrastructure_manager"] = infrastructure_data
 
+        # 市長のデータ
+        if manager_type in ['all', 'mayor']:
+            mayor_data = {
+                "name": "市長",
+                "class": "Mayor",
+                "status": {
+                    "available": not getattr(chat.mayor, 'away_from_desk', False),
+                    "in_conversation": getattr(chat.mayor, 'in_conversation', False),
+                    "away_reason": getattr(chat.mayor, 'away_reason', None)
+                },
+                "csv_files": {},
+                "memory": {
+                    "conversation_history_count": len(getattr(chat, 'mayor_conversation_history', [])),
+                    "conversation_sample": getattr(chat, 'mayor_conversation_history', [])[-3:] if getattr(chat, 'mayor_conversation_history', []) else []
+                },
+                "workers": []
+            }
+
+            # 市長は危機管理室と同じCSVファイルを参照
+            try:
+                import pandas as pd
+                from pathlib import Path
+
+                csv_path = Path("csv/information")
+                if csv_path.exists():
+                    for csv_file in csv_path.glob("*.csv"):
+                        try:
+                            df = pd.read_csv(csv_file)
+                            df = df.fillna('')
+                            mayor_data["csv_files"][csv_file.name] = {
+                                "shape": df.shape,
+                                "columns": df.columns.tolist(),
+                                "sample_data": df.to_dict('records'),
+                                "dtypes": df.dtypes.astype(str).to_dict()
+                            }
+                        except Exception as file_error:
+                            print(f"Error reading {csv_file}: {file_error}")
+            except Exception as csv_error:
+                print(f"CSV data error for mayor: {csv_error}")
+
+            # 市長専用の知識ファイルを読み込み
+            try:
+                from pathlib import Path
+
+                knowledge_files = {}
+                knowledge_path = Path("src/knowledge")
+
+                # 市長専用knowledge
+                mayor_knowledge_path = knowledge_path / "knowledge_mayor.txt"
+                if mayor_knowledge_path.exists():
+                    with open(mayor_knowledge_path, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                        if content:
+                            knowledge_files["knowledge_mayor.txt"] = content
+
+                mayor_data["knowledge_files"] = knowledge_files
+            except Exception as knowledge_error:
+                print(f"Knowledge file error for mayor: {knowledge_error}")
+                mayor_data["knowledge_files"] = {}
+
+            # Person historiesを追加
+            mayor_data["person_histories"] = chat.person_histories
+
+            debug_data["mayor"] = mayor_data
+
         return jsonify(debug_data)
     except Exception as e:
         import traceback
@@ -537,8 +605,8 @@ def get_person_info():
             person_info["csv_files"] = csv_files
             person_info["available"] = not manager.away_until_time
 
-        elif person == "mayor_manager":
-            manager = chat.mayor_manager
+        elif person == "mayor":
+            manager = chat.mayor
             # 知識情報
             person_info["knowledge"] = manager.get_knowledge()
             # CSV情報
@@ -647,8 +715,43 @@ def get_person_info():
             else:
                 person_info["knowledge"] = "土木Worker情報が見つかりません"
 
+        elif person == "mayor":
+            # 市長の場合、危機管理室のCSVと市長専用の知識を使用
+            try:
+                # 市長専用の知識ファイルを読み込み
+                knowledge_path = Path("src/knowledge/knowledge_mayor.txt")
+                if knowledge_path.exists():
+                    with open(knowledge_path, 'r', encoding='utf-8') as f:
+                        person_info["knowledge"] = f.read()
+                else:
+                    person_info["knowledge"] = "市長としての知識ファイルが見つかりません"
+
+                # 危機管理室と同じCSVファイルを参照
+                csv_files = []
+                csv_path = Path("csv/information")
+                if csv_path.exists():
+                    for csv_file in csv_path.glob("*.csv"):
+                        try:
+                            import pandas as pd
+                            df = pd.read_csv(csv_file)
+                            csv_files.append({
+                                "name": csv_file.name,
+                                "rows": len(df),
+                                "columns": df.columns.tolist()
+                            })
+                        except:
+                            csv_files.append({
+                                "name": csv_file.name,
+                                "rows": 0,
+                                "columns": []
+                            })
+                person_info["csv_files"] = csv_files
+                person_info["available"] = True
+            except Exception as e:
+                person_info["knowledge"] = f"市長情報の取得に失敗: {str(e)}"
+
         elif person == "Player":
-            person_info["knowledge"] = "災害対応訓練参加者として、情報管理班と物資管理班と連携して対応を行う"
+            person_info["knowledge"] = "危機管理室の室長として、室内の情報Managerや市長、そして実働部の物資管理班、土木・建設班と連携して対応を行う"
             person_info["available"] = True
 
         else:

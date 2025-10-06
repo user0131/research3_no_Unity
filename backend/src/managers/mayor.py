@@ -8,11 +8,8 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from csv_operations import create_csv_file, update_csv_from_knowledge
-from rag_search import search_and_summarize
 
-
-class MayorManager:
+class Mayor:
     """市長クラス"""
 
     def __init__(self, client: OpenAI, time_manager):
@@ -31,19 +28,20 @@ class MayorManager:
         knowledge_content = self.get_knowledge()
 
         return f"""
-あなたは災害対応の指揮を執る市長です。あなたは"mayor_manager"です。
-地震を想定した避難訓練の総指揮を執り、情報管理室で各部署からの報告を受けて適切な指示を出しています。
+あなたは市長です。
+地震を想定した避難訓練を"Player"と現在行っています。
 
+# 以下はPlayerに無理に開示しなくて大丈夫な情報です。
 ## 災害対応ルール：
-- **役職と責任**: あなたは市長として、災害対応の最高責任者です。市民への広報・避難指示、知事との連絡、府下市町村との連絡、各部署への指示を行います。
-- **会話スタイル**: 市長として威厳を持ちつつも、職員やPlayerに対して親身に接します。簡潔で明確な指示を心がけます。
-- **情報の扱い**: 各部署からの報告を総合的に判断し、的確な指示を出します。推測や憶測は避け、事実に基づいた判断を行います。
+- **役職と責任**: 職員との自然な会話を心がける。まずは普通に話す。情報の羅列や箇条書きは禁止。話し言葉で応答。あなたは相手の話を聞き、簡潔に返答します。ユーザに聞かれたこと以外は極力返さないように。
+- **会話スタイル**: 市長として威厳を持ちつつも、職員やPlayerに対して親身に接します。
+- **情報の扱い**: 推測や憶測は避け、事実に基づいた判断を行います。
 - **作業依頼**: Playerから明確に、具体的に何かの作業を頼まれた場合のみ、作業を実行してください。それ以外は通常の会話をしてください。
 - **重要：ツールの使用**: 実際の作業は必ずツールを使って実行してください。会話（テキスト応答）では作業を実行できません。
   - **市民への広報・避難指示**: public_announcementツールを使用
   - **知事との連絡**: contact_governorツールを使用
   - **府下市町村との連絡**: contact_municipalitiesツールを使用
-  - **各部署への一斉連絡**: broadcast_to_departmentsツールを使用
+  - **各部署への一斉連絡**: broadcast_to_departmentsツールを使用。情報管理室・物資管理班・建物・土木対策班に同時に連絡される
   - **CSV内容表示**: show_csv_contentツールを使用（単一または複数ファイル対応、確認系なので許可不要）
   - **CSV一覧表示**: list_all_csv_filesツールを使用（全ファイル一覧、確認系なので許可不要）
   - **必須**: タスクを実行する場合は、必ず適切なツールを呼び出してください。
@@ -52,14 +50,15 @@ class MayorManager:
 - systemロールにて、【情報付与】と表示されて会話履歴に入る情報は、リアルタイムで入ってくる災害関連の最新情報です。
 
 ## 重要
-- 市長として、全体の状況を把握し、適切な判断を下してください。
-- ユーザに聞かれたこと以外は極力返さないように。
+- 自然な会話を心がけてください。選択肢の提示や提案はせず、Playerから言われたことに簡潔に反応してください。
+- Playerに聞かれたこと以外は極力返さないように。
+- Playerに支持されたこと以外は極力行わないように。
 
 ## あなたが知っている知識
 {knowledge_content if knowledge_content.strip() else "まだ知識がありません。"}
 
 ## これまでの会話履歴
-以下に続くメッセージは、Playerとあなた(mayor_manager)のこれまでの会話履歴です。
+以下に続くメッセージは、Playerとあなた(mayor)のこれまでの会話履歴です。
 """
 
     def get_knowledge(self) -> str:
@@ -182,11 +181,11 @@ class MayorManager:
                 else:
                     continue
 
-                self.manager.add_message("system", "mayor_manager", system_message, manager_type,
-                                       from_person="mayor_manager", to_person=dept)
+                self.manager.add_message("system", "mayor", system_message, manager_type,
+                                       from_person="mayor", to_person=dept)
 
         dept_names_jp = {
-            "information_team": "情報管理室",
+            "information_team": "危機管理室",
             "supply_team": "物資管理班",
             "infrastructure_team": "建物・産業・土木対策班"
         }
@@ -437,9 +436,9 @@ class MayorManager:
             return "未対応のツールが呼ばれました。"
 
     def execute_task_with_delay(self, task_name: str, args: Dict = None) -> str:
-        """タスクを実行し、10分後の戻り時刻を設定"""
+        """タスクを実行し、2分後の戻り時刻を設定"""
         current_time = datetime.strptime(self.time_manager.get_current_time(), "%H:%M")
-        return_time = current_time + timedelta(minutes=10)
+        return_time = current_time + timedelta(minutes=2)
         self.away_until_time = return_time.strftime("%H:%M")
         self.current_task_description = task_name
         return f"{task_name}に行ってきます。{self.away_until_time}頃に戻ります。"
@@ -656,4 +655,4 @@ class MayorManager:
         else:
             assistant_message = response_message.content
 
-        return assistant_message, "mayor_manager"
+        return assistant_message, "mayor"

@@ -1,18 +1,33 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { api } from '../api/client';
 import { Message } from '../types';
 import './Chat.css';
 
 interface ChatProps {
-  selectedManager: 'information' | 'supply' | 'infrastructure';
+  selectedManager: 'information' | 'supply' | 'infrastructure' | 'mayor';
+  selectedChatPerson?: string;
+  setSelectedChatPerson?: (person: string) => void;
 }
 
-const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
+const Chat: React.FC<ChatProps> = ({ selectedManager, selectedChatPerson: externalSelectedPerson, setSelectedChatPerson: externalSetSelectedPerson }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const [internalSelectedPerson, setInternalSelectedPerson] = useState<string>(() => {
+    if (selectedManager === 'information') {
+      return localStorage.getItem(`selectedChatPerson_${selectedManager}`) || 'information_manager';
+    }
+    return selectedManager === 'supply' ? 'supply_manager' : 'infrastructure_manager';
+  });
+
+  // 外部から渡される場合はそれを使用、そうでなければ内部状態を使用
+  const selectedPerson = useMemo(() =>
+    externalSelectedPerson || internalSelectedPerson,
+    [externalSelectedPerson, internalSelectedPerson]
+  );
+  const setSelectedPerson = externalSetSelectedPerson || setInternalSelectedPerson;
   const messagesEndRef = useRef<null | HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,7 +53,13 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
       clearInterval(timeInterval);
       clearInterval(historyInterval);
     };
-  }, [selectedManager]);
+  }, [selectedManager, selectedPerson]);
+
+  useEffect(() => {
+    if (selectedManager === 'information' && !externalSelectedPerson) {
+      localStorage.setItem(`selectedChatPerson_${selectedManager}`, selectedPerson);
+    }
+  }, [selectedManager, selectedPerson, externalSelectedPerson]);
 
   useEffect(() => {
     if (shouldAutoScroll) {
@@ -61,8 +82,19 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
 
   const loadHistory = async () => {
     try {
-      const response = await api.getHistory(selectedManager);
-      setMessages(response.data.history || []);
+      if (selectedManager === 'information' && selectedPerson) {
+        // 危機管理室で特定の人物（情報Managerまたは市長）を選択した場合
+        if (selectedPerson === 'mayor') {
+          const response = await api.getHistory('mayor');
+          setMessages(response.data.history || []);
+        } else {
+          const response = await api.getHistory(selectedManager, selectedPerson);
+          setMessages(response.data.history || []);
+        }
+      } else {
+        const response = await api.getHistory(selectedManager);
+        setMessages(response.data.history || []);
+      }
     } catch (error) {
       console.error('履歴取得エラー:', error);
     }
@@ -71,7 +103,13 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
   const sendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
 
-    const messageToSend = `/${selectedManager}_manager/${inputMessage}`;
+    let messageToSend: string;
+    if (selectedManager === 'information' && selectedPerson === 'mayor') {
+      messageToSend = `/mayor/${inputMessage}`;
+    } else {
+      messageToSend = `/${selectedManager}_manager/${inputMessage}`;
+    }
+
     setInputMessage('');
     setIsLoading(true);
     setShouldAutoScroll(true);
@@ -110,9 +148,11 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
       'supply_manager': '物資Manager',
       'information_manager': '情報Manager',
       'infrastructure_manager': '土木Manager',
+      'mayor': '市長',
       'SUPPLY_MANAGER': '物資Manager',
       'INFORMATION_MANAGER': '情報Manager',
       'INFRASTRUCTURE_MANAGER': '土木Manager',
+      'MAYOR': '市長',
       'ワーカーA': 'Worker A',
       'ワーカーB': 'Worker B',
       'ワーカーC': 'Worker C',
@@ -130,6 +170,7 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
       // Playerの発言：「→ 相手」
       const toName = message.to || (selectedManager === 'information' ? '情報Manager'
                                    : selectedManager === 'supply' ? '物資Manager'
+                                   : selectedManager === 'mayor' ? '市長'
                                    : '土木Manager');
       return `→ ${getPersonDisplayName(toName)}`;
     } else {
@@ -140,14 +181,40 @@ const Chat: React.FC<ChatProps> = ({ selectedManager }) => {
     }
   };
 
+  const getPersonsForChat = () => {
+    if (selectedManager === 'information') {
+      return [
+        { id: 'information_manager', name: '情報Manager' },
+        { id: 'mayor', name: '市長' }
+      ];
+    }
+    return [];
+  };
+
   return (
     <div className="chat-container">
       <div className="chat-header">
-        <h2>
-          {selectedManager === 'information' ? '情報管理班'
-           : selectedManager === 'supply' ? '物資管理班'
-           : '建物・土木対策班'}
-        </h2>
+        <div className="chat-header-left">
+          <h2>
+            {selectedManager === 'information' ? '危機管理室'
+             : selectedManager === 'supply' ? '物資管理班'
+             : selectedManager === 'mayor' ? '市長との会話'
+             : '建物・土木対策班'}
+          </h2>
+          {selectedManager === 'information' && (
+            <div className="person-tabs">
+              {getPersonsForChat().map((person) => (
+                <button
+                  key={person.id}
+                  className={`person-tab ${selectedPerson === person.id ? 'active' : ''}`}
+                  onClick={() => setSelectedPerson(person.id)}
+                >
+                  {person.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <span className="current-time">現在時刻: {currentTime}</span>
       </div>
 

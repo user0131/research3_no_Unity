@@ -4,7 +4,7 @@ import { ManagerDebugData, Message } from '../types'; // 型設定
 import './ManagerInfo.css';
 
 interface ManagerInfoProps {
-  managerType: 'information' | 'supply' | 'infrastructure';
+  managerType: 'information' | 'supply' | 'infrastructure' | 'mayor';
 }
 
 const ManagerInfo: React.FC<ManagerInfoProps> = ({ managerType }) => {
@@ -38,10 +38,33 @@ const ManagerInfo: React.FC<ManagerInfoProps> = ({ managerType }) => {
 
   const loadManagerData = async () => {
     try {
-      const response = await api.getManagerDebugData(managerType);
-      const data = response.data[`${managerType}_manager`];
-      if (data) {
-        setManagerData(data);
+      if (managerType === 'mayor') {
+        // 市長の場合はバックエンドからデータを取得
+        const response = await api.getManagerDebugData('mayor');
+        const data = response.data['mayor'];
+        if (data) {
+          setManagerData(data);
+        } else {
+          // フォールバック：簡易的なデータを設定
+          setManagerData({
+            name: 'mayor',
+            class: 'Mayor',
+            status: { available: true, in_conversation: false },
+            csv_files: {},
+            knowledge_files: {},
+            memory: {
+              conversation_history_count: 0,
+              conversation_sample: []
+            },
+            workers: []
+          });
+        }
+      } else {
+        const response = await api.getManagerDebugData(managerType);
+        const data = response.data[`${managerType}_manager`];
+        if (data) {
+          setManagerData(data);
+        }
       }
     } catch (error) {
       console.error('マネージャーデータ取得エラー:', error);

@@ -9,9 +9,9 @@ import './App.css';
 type ViewMode = 'chat' | 'person';
 
 function App() {
-  const [selectedManager, setSelectedManager] = useState<'information' | 'supply' | 'infrastructure'>(() => {
+  const [selectedManager, setSelectedManager] = useState<'information' | 'supply' | 'infrastructure' | 'mayor'>(() => {
     const saved = localStorage.getItem('selectedManager');
-    return (saved === 'supply' || saved === 'information' || saved === 'infrastructure') ? saved : 'information';
+    return (saved === 'supply' || saved === 'information' || saved === 'infrastructure' || saved === 'mayor') ? saved : 'information';
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -26,7 +26,9 @@ function App() {
         ? ['supply_manager', '物資ワーカーA', '物資ワーカーB', '物資ワーカーC']
         : selectedManager === 'infrastructure'
         ? ['infrastructure_manager', '土木ワーカーA', '土木ワーカーB', '土木ワーカーC']
-        : ['Player', 'information_manager'];
+        : selectedManager === 'mayor'
+        ? ['Player', 'mayor']
+        : ['Player', 'information_manager', 'mayor'];
       if (validPersons.includes(saved)) {
         return saved;
       }
@@ -34,7 +36,15 @@ function App() {
     // デフォルト値
     return selectedManager === 'supply' ? 'supply_manager'
          : selectedManager === 'infrastructure' ? 'infrastructure_manager'
+         : selectedManager === 'mayor' ? 'Player'
          : 'Player';
+  });
+
+  const [selectedChatPerson, setSelectedChatPerson] = useState<string>(() => {
+    if (selectedManager === 'information') {
+      return localStorage.getItem(`selectedChatPerson_${selectedManager}`) || 'information_manager';
+    }
+    return selectedManager === 'supply' ? 'supply_manager' : 'infrastructure_manager';
   });
 
   useEffect(() => {
@@ -45,6 +55,7 @@ function App() {
       // 現在の人物が無効な場合のみデフォルト値を設定
       const defaultPerson = selectedManager === 'supply' ? 'supply_manager'
                            : selectedManager === 'infrastructure' ? 'infrastructure_manager'
+                           : selectedManager === 'mayor' ? 'Player'
                            : 'Player';
       setSelectedPerson(defaultPerson);
     }
@@ -58,13 +69,21 @@ function App() {
     localStorage.setItem('selectedPerson', selectedPerson);
   }, [selectedPerson]);
 
-  const getPersonsForManager = (managerType: 'information' | 'supply' | 'infrastructure') => {
+  useEffect(() => {
+    if (selectedManager === 'information') {
+      localStorage.setItem(`selectedChatPerson_${selectedManager}`, selectedChatPerson);
+    }
+  }, [selectedManager, selectedChatPerson]);
+
+  const getPersonsForManager = (managerType: 'information' | 'supply' | 'infrastructure' | 'mayor') => {
     if (managerType === 'supply') {
       return ['supply_manager', '物資ワーカーA', '物資ワーカーB', '物資ワーカーC'];
     } else if (managerType === 'infrastructure') {
       return ['infrastructure_manager', '土木ワーカーA', '土木ワーカーB', '土木ワーカーC'];
+    } else if (managerType === 'mayor') {
+      return ['Player', 'mayor'];
     } else {
-      return ['Player', 'information_manager'];
+      return ['Player', 'information_manager', 'mayor'];
     }
   };
 
@@ -78,7 +97,7 @@ function App() {
               className={`tab ${selectedManager === 'information' ? 'active' : ''}`}
               onClick={() => setSelectedManager('information')}
             >
-              情報管理班
+              危機管理室
             </button>
             <button
               className={`tab ${selectedManager === 'supply' ? 'active' : ''}`}
@@ -103,7 +122,8 @@ function App() {
                 >
                   {person === 'supply_manager' ? '物資Manager' :
                    person === 'information_manager' ? '情報Manager' :
-                   person === 'infrastructure_manager' ? '土木Manager' : person}
+                   person === 'infrastructure_manager' ? '土木Manager' :
+                   person === 'mayor' ? '市長' : person}
                 </button>
               ))}
             </div>
@@ -143,10 +163,18 @@ function App() {
         ) : (
           <>
             <div className="main-content">
-              <Chat selectedManager={selectedManager} />
+              <Chat
+                selectedManager={selectedManager}
+                selectedChatPerson={selectedChatPerson}
+                setSelectedChatPerson={setSelectedChatPerson}
+              />
             </div>
             <div className="sidebar">
-              <ManagerInfo managerType={selectedManager} />
+              <ManagerInfo managerType={
+                selectedManager === 'information' && selectedChatPerson === 'mayor'
+                  ? 'mayor'
+                  : selectedManager
+              } />
             </div>
           </>
         )}

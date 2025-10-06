@@ -13,8 +13,13 @@ export const api = {
   // チャット関連
   startChat: () => apiClient.post('/chat/start'),
   sendMessage: (message: string) => apiClient.post('/chat/send', { message }),
-  getHistory: (managerType: string = 'all') =>
-    apiClient.get('/chat/history', { params: { manager_type: managerType } }),
+  getHistory: (managerType: string = 'all', person?: string) =>
+    apiClient.get('/chat/history', {
+      params: {
+        manager_type: managerType,
+        ...(person && { person })
+      }
+    }),
 
   // 時間管理
   getCurrentTime: () => apiClient.get('/time/current'),

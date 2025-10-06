@@ -55,6 +55,7 @@ const PersonInfo: React.FC<PersonInfoProps> = ({ person }) => {
       'supply_manager': '物資Manager',
       'information_manager': '情報Manager',
       'infrastructure_manager': '土木Manager',
+      'mayor': '市長',
       '物資ワーカーA': '物資Worker A',
       '物資ワーカーB': '物資Worker B',
       '物資ワーカーC': '物資Worker C',
@@ -121,6 +122,7 @@ const PersonInfo: React.FC<PersonInfoProps> = ({ person }) => {
                   {person === 'supply_manager' ? 'knowledge_supply.txt' :
                    person === 'information_manager' ? 'knowledge_information.txt' :
                    person === 'infrastructure_manager' ? 'knowledge_infrastructure.txt' :
+                   person === 'mayor' ? 'knowledge_mayor.txt' :
                    'knowledge.txt'}
                 </span>
               </div>
