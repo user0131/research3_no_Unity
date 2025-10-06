@@ -170,7 +170,7 @@ class ChatWithMemory:
                 if member in self.person_histories and member != from_person:
                     self.person_histories[member].append(message)
         elif to_person == "infrastructure_team":
-            # 建物・産業・土木対策班全体（infrastructure_manager, 土木ワーカーA/B/C）に追加
+            # 建物・土木対策班全体（infrastructure_manager, 土木ワーカーA/B/C）に追加
             infrastructure_team_members = ["infrastructure_manager", "土木ワーカーA", "土木ワーカーB", "土木ワーカーC"]
             for member in infrastructure_team_members:
                 if member in self.person_histories and member != from_person:

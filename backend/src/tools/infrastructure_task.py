@@ -7,7 +7,7 @@ from csv_operations import update_csv_from_knowledge
 
 
 class InfrastructureInspectionTool:
-    """建物・産業・土木施設の被害調査ツール"""
+    """建物・土木施設の被害調査ツール"""
 
     def __init__(self, time_manager=None):
         self.damage_report_path = Path("./csv/infrastructure/被害調査報告.csv")

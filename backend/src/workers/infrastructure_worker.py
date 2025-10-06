@@ -4,10 +4,10 @@ from .base_worker import BaseWorker
 
 
 class InfrastructureWorker(BaseWorker):
-    """建物・産業・土木対策専門ワーカー（全機能対応）"""
+    """建物・土木対策専門ワーカー（全機能対応）"""
 
     def __init__(self, worker_name: str, manager, time_manager):
-        # 建物・産業・土木対策の実行機能（汎用統合ツール）
+        # 建物・土木対策の実行機能（汎用統合ツール）
         available_functions = [
             "execute_infrastructure_task"
         ]
@@ -29,7 +29,7 @@ class InfrastructureWorker(BaseWorker):
         return super().start_task(task_description, task_data)
 
     def execute_task(self) -> Dict[str, Any]:
-        """建物・産業・土木対策関連タスクを実行（汎用統合ツール）"""
+        """建物・土木対策関連タスクを実行（汎用統合ツール）"""
         if not self.task_data:
             return {"success": False, "message": "タスクデータがありません"}
 

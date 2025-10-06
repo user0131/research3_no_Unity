@@ -46,6 +46,13 @@ class Mayor:
   - **CSV一覧表示**: list_all_csv_filesツールを使用（全ファイル一覧、確認系なので許可不要）
   - **必須**: タスクを実行する場合は、必ず適切なツールを呼び出してください。
 
+- **発信前の内容協議（重要）**:
+  - 広報・連絡系のツールを実行する前に、必ずPlayerと発信内容を協議してください
+  - Playerの指示が具体的でない場合: 「どのような指示にしましょうか」と内容を確認
+  - Playerの指示が曖昧な場合: 具体的な発信内容案を提示して「○○という内容でよろしいでしょうか」と確認
+  - Playerが内容を承認してからツールを実行してください
+  - 「例えば」「以下の内容で発信いたします」などの余計な前置きは不要
+
 ## 情報付与について
 - systemロールにて、【情報付与】と表示されて会話履歴に入る情報は、リアルタイムで入ってくる災害関連の最新情報です。
 
@@ -86,7 +93,7 @@ class Mayor:
         # Playerへの了解メッセージを送信
         acknowledgment = self._generate_acknowledgment_message(context, "市民への広報")
         if self.manager:
-            self.manager.add_message("assistant", "mayor", acknowledgment, "information",
+            self.manager.add_message("assistant", "mayor", acknowledgment, "mayor",
                                    from_person="mayor", to_person="Player")
 
         # 別LLMで市民向けメッセージを作成（会話履歴から判断）
@@ -94,12 +101,10 @@ class Mayor:
 
         # 市民への広報メッセージを送信
         if self.manager:
-            self.manager.add_message("system", "mayor", citizen_message, "information",
+            self.manager.add_message("system", "mayor", citizen_message, "mayor",
                                    from_person="mayor", to_person="市民")
 
-        # 発信後にCSV記録用の内容を別LLMで生成
-        csv_content = self._generate_csv_content_for_announcement(citizen_message)
-
+        # 市民向けメッセージの内容をそのままCSVに記録
         # CSVファイルパス
         csv_path = self.csv_base_path / "【市長専用】市民への広報記録.csv"
 
@@ -109,7 +114,7 @@ class Mayor:
         # 新しい記録
         new_record = {
             "発信日時": current_time,
-            "内容": csv_content,
+            "内容": citizen_message,
             "発信者": "市長"
         }
 
@@ -118,7 +123,7 @@ class Mayor:
         df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
         df.to_csv(csv_path, index=False, encoding='utf-8')
 
-        return f"市民への広報を実施しました。\n内容: {csv_content}"
+        return f"市民への広報を実施しました。"
 
     def _execute_contact_governor(self, context: List[Dict]) -> str:
         """知事との連絡を実行"""
@@ -127,7 +132,7 @@ class Mayor:
         # Playerへの了解メッセージを送信
         acknowledgment = self._generate_acknowledgment_message(context, "府知事への連絡")
         if self.manager:
-            self.manager.add_message("assistant", "mayor", acknowledgment, "information",
+            self.manager.add_message("assistant", "mayor", acknowledgment, "mayor",
                                    from_person="mayor", to_person="Player")
 
         # 別LLMで府知事向けメッセージを作成（会話履歴から判断）
@@ -135,17 +140,15 @@ class Mayor:
 
         # 府知事への連絡メッセージを送信
         if self.manager:
-            self.manager.add_message("system", "mayor", governor_message, "information",
+            self.manager.add_message("system", "mayor", governor_message, "mayor",
                                    from_person="mayor", to_person="府知事")
 
             # 府知事からの了解返信を生成・送信
             governor_reply = self._generate_governor_reply(governor_message)
-            self.manager.add_message("system", "府知事", governor_reply, "information",
+            self.manager.add_message("system", "府知事", governor_reply, "mayor",
                                    from_person="府知事", to_person="mayor")
 
-        # 発信後にCSV記録用の内容を別LLMで生成
-        subject, content = self._generate_csv_content_for_governor(governor_message)
-
+        # 知事向けメッセージの内容をそのままCSVに記録
         # CSVファイルパス
         csv_path = self.csv_base_path / "【市長専用】知事との連絡記録.csv"
 
@@ -155,8 +158,8 @@ class Mayor:
         # 新しい記録
         new_record = {
             "連絡日時": current_time,
-            "件名": subject,
-            "内容": content,
+            "件名": "府知事への連絡",
+            "内容": governor_message,
             "発信者": "市長",
             "宛先": "府知事"
         }
@@ -166,7 +169,7 @@ class Mayor:
         df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
         df.to_csv(csv_path, index=False, encoding='utf-8')
 
-        return f"知事への連絡を実施しました。\n件名: {subject}\n内容: {content}"
+        return f"知事への連絡を実施しました。"
 
     def _execute_contact_municipalities(self, context: List[Dict], target_municipalities: List[str] = None) -> str:
         """府下市町村との連絡を実行"""
@@ -179,7 +182,7 @@ class Mayor:
         # Playerへの了解メッセージを送信
         acknowledgment = self._generate_acknowledgment_message(context, "市町村への連絡")
         if self.manager:
-            self.manager.add_message("assistant", "mayor", acknowledgment, "information",
+            self.manager.add_message("assistant", "mayor", acknowledgment, "mayor",
                                    from_person="mayor", to_person="Player")
 
         # 別LLMで市町村向けメッセージを作成（会話履歴から判断）
@@ -188,17 +191,15 @@ class Mayor:
         # 市町村への連絡メッセージを送信
         if self.manager:
             for municipality in target_municipalities:
-                self.manager.add_message("system", "mayor", municipality_message, "information",
+                self.manager.add_message("system", "mayor", municipality_message, "mayor",
                                        from_person="市長", to_person=municipality)
 
                 # 各市町村からの了解返信を生成・送信
                 municipality_reply = self._generate_municipality_reply(municipality_message, municipality)
-                self.manager.add_message("system", municipality, municipality_reply, "information",
+                self.manager.add_message("system", municipality, municipality_reply, "mayor",
                                        from_person=municipality, to_person="市長")
 
-        # 発信後にCSV記録用の内容を別LLMで生成
-        subject, content = self._generate_csv_content_for_municipalities(municipality_message, target_municipalities)
-
+        # 市町村向けメッセージの内容をそのままCSVに記録
         # CSVファイルパス
         csv_path = self.csv_base_path / "【市長専用】市町村連絡記録.csv"
 
@@ -208,8 +209,8 @@ class Mayor:
         # 新しい記録
         new_record = {
             "連絡日時": current_time,
-            "件名": subject,
-            "内容": content,
+            "件名": "府下市町村への連絡",
+            "内容": municipality_message,
             "発信者": "市長",
             "宛先": ", ".join(target_municipalities)
         }
@@ -219,7 +220,7 @@ class Mayor:
         df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
         df.to_csv(csv_path, index=False, encoding='utf-8')
 
-        return f"府下市町村への連絡を実施しました。\n宛先: {', '.join(target_municipalities)}\n件名: {subject}\n内容: {content}"
+        return f"府下市町村への連絡を実施しました。"
 
     def _execute_broadcast_to_departments(self, context: List[Dict], departments: List[str] = None) -> str:
         """各部署への一斉連絡を実行"""
@@ -230,7 +231,7 @@ class Mayor:
         # Playerへの了解メッセージを送信
         acknowledgment = self._generate_acknowledgment_message(context, "各部署への一斉連絡")
         if self.manager:
-            self.manager.add_message("assistant", "mayor", acknowledgment, "information",
+            self.manager.add_message("assistant", "mayor", acknowledgment, "mayor",
                                    from_person="mayor", to_person="Player")
 
         # ChatWithMemoryのインスタンスを通じて各部署に連綄
@@ -254,11 +255,11 @@ class Mayor:
         dept_names_jp = {
             "information_team": "危機管理室",
             "supply_team": "物資管理班",
-            "infrastructure_team": "建物・産業・土木対策班"
+            "infrastructure_team": "建物・土木対策班"
         }
         dept_names = [dept_names_jp.get(d, d) for d in departments]
 
-        return f"各部署への一斉連絡を実施しました。\n対象: {', '.join(dept_names)}"
+        return f"各部署への一斉連絡を実施しました。"
 
     def _record_tool_execution(self, tool_name: str, args: Dict = None):
         """ツール実行記録を知識に追加"""
@@ -266,30 +267,32 @@ class Mayor:
             current_time = self.time_manager.get_current_time()
             args = args or {}
 
-            # 引数の整形
+            # 引数の整形（新しいパラメータ形式に対応）
             if tool_name == "public_announcement":
-                content = args.get("content", "")[:50]
-                urgency = args.get("urgency", "")
-                args_text = f"内容: {content}..., 緊急度: {urgency}"
+                args_text = "市民への広報・避難指示を実行"
             elif tool_name == "contact_governor":
-                subject = args.get("subject", "")
-                args_text = f"件名: {subject}"
+                args_text = "府知事への連絡を実行"
             elif tool_name == "contact_municipalities":
-                subject = args.get("subject", "")
                 municipalities = args.get("target_municipalities", [])
-                args_text = f"件名: {subject}, 対象: {len(municipalities)}市町村"
+                if municipalities:
+                    args_text = f"市町村への連絡を実行（対象: {len(municipalities)}市町村）"
+                else:
+                    args_text = "市町村への連絡を実行（全市町村）"
             elif tool_name == "broadcast_to_departments":
-                message = args.get("message", "")[:50]
-                args_text = f"メッセージ: {message}..."
+                departments = args.get("departments", [])
+                if departments:
+                    args_text = f"各部署への一斉連絡を実行（対象: {len(departments)}部署）"
+                else:
+                    args_text = "各部署への一斉連絡を実行（全部署）"
             elif tool_name == "show_csv_content":
                 filenames = args.get("filenames", [])
                 if isinstance(filenames, str):
                     filenames = [filenames]
-                args_text = f"ファイル数: {len(filenames)}, ファイル: {', '.join(filenames[:3])}{'...' if len(filenames) > 3 else ''}"
+                args_text = f"CSV内容確認（ファイル数: {len(filenames)}）"
             elif tool_name == "list_all_csv_files":
-                args_text = "引数なし"
+                args_text = "CSV一覧確認"
             else:
-                args_text = str(args) if args else "引数なし"
+                args_text = f"ツール実行: {tool_name}"
 
             # 現在のknowledge内容を読み取り
             try:
@@ -489,6 +492,8 @@ class Mayor:
 - 状況に応じた適切な表現で
 - 具体的で実用的な内容で
 - 200文字以内で
+- システム的な文言（ツール名、実行など）は一切含めない
+- 市民が直接読む自然な広報文のみを出力
 
 市民向けメッセージ:
 """
@@ -504,27 +509,6 @@ class Mayor:
             print(f"市民向けメッセージ生成エラー: {e}")
             return "市民の皆様へ重要なお知らせがあります。"
 
-    def _generate_csv_content_for_announcement(self, sent_message: str) -> str:
-        """市民への広報発信後にCSV記録用の内容を生成"""
-        try:
-            prompt = f"""
-以下の市民へ発信したメッセージをCSV記録用に要約してください。
-
-発信メッセージ: {sent_message}
-
-要約:
-"""
-
-            response = self.client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            return response.choices[0].message.content.strip()
-
-        except Exception as e:
-            print(f"CSV内容生成エラー: {e}")
-            return "市民への広報を実施"
 
     def _generate_governor_message_from_context(self, context: List[Dict]) -> str:
         """別LLMで府知事向けメッセージを生成（会話履歴から判断）"""
@@ -539,10 +523,12 @@ class Mayor:
 {context_str}
 
 要件:
-- 公式な文書として適切な敬語で
+- 電話での会話として適切な敬語で
 - 簡潔で要点を明確に
 - 具体的な状況や要請があれば明記
 - 300文字以内で
+- システム的な文言（ツール名、実行など）は一切含めない
+- 府知事との電話での自然な会話内容のみを出力
 
 府知事向けメッセージ:
 """
@@ -558,40 +544,6 @@ class Mayor:
             print(f"府知事向けメッセージ生成エラー: {e}")
             return "府知事への緊急連絡です。"
 
-    def _generate_csv_content_for_governor(self, sent_message: str) -> tuple[str, str]:
-        """知事への連絡発信後にCSV記録用の内容を生成"""
-        try:
-            prompt = f"""
-以下の府知事へ発信したメッセージからCSV記録用の件名と内容を抽出してください。
-
-発信メッセージ: {sent_message}
-
-出力形式:
-件名: （件名50文字以内）
-CSV内容: （内容）
-"""
-
-            response = self.client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            response_text = response.choices[0].message.content.strip()
-            lines = response_text.split('\n')
-            subject = "緊急連絡"
-            content = "府知事への連絡"
-
-            for line in lines:
-                if line.startswith("件名:"):
-                    subject = line.replace("件名:", "").strip()
-                elif line.startswith("CSV内容:"):
-                    content = line.replace("CSV内容:", "").strip()
-
-            return subject, content
-
-        except Exception as e:
-            print(f"CSV内容生成エラー: {e}")
-            return "緊急連絡", "府知事への連絡"
 
     def _generate_municipality_message_from_context(self, context: List[Dict], target_municipalities: List[str]) -> str:
         """別LLMで市町村向けメッセージを生成（会話履歴から判断）"""
@@ -601,7 +553,7 @@ CSV内容: （内容）
             context_str = "\n".join([f"{msg.get('role', '')}: {msg.get('content', '')}" for msg in recent_messages])
 
             prompt = f"""
-あなたは市長です。以下の会話履歴を踏まえて、府下市町村（{municipalities_str}）へのメッセージを作成してください。
+あなたは市長です。以下の会話履歴を踏まえて、府下市町村（{municipalities_str}）への電話連絡内容を作成してください。
 
 会話履歴:
 {context_str}
@@ -609,10 +561,12 @@ CSV内容: （内容）
 対象: {municipalities_str}
 
 要件:
-- 自治体間の連携を意識した表現で
+- 電話での会話として自治体間の連携を意識した表現で
 - 協力要請や情報共有の目的を明確に
 - 具体的で実用的な内容で
 - 簡潔に
+- システム的な文言（ツール名、実行など）は一切含めない
+- 市町村との電話での自然な会話内容のみを出力
 
 市町村向けメッセージ:
 """
@@ -628,41 +582,6 @@ CSV内容: （内容）
             print(f"市町村向けメッセージ生成エラー: {e}")
             return "各市町村への重要な連絡です。"
 
-    def _generate_csv_content_for_municipalities(self, sent_message: str, target_municipalities: List[str]) -> tuple[str, str]:
-        """市町村への連絡発信後にCSV記隂用の内容を生成"""
-        try:
-            municipalities_str = "、".join(target_municipalities)
-            prompt = f"""
-以下の市町村（{municipalities_str}）へ発信したメッセージからCSV記録用の件名と内容を抽出してください。
-
-発信メッセージ: {sent_message}
-
-出力形式:
-件名: （件名50文字以内）
-CSV内容: （内容）
-"""
-
-            response = self.client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[{"role": "user", "content": prompt}]
-            )
-
-            response_text = response.choices[0].message.content.strip()
-            lines = response_text.split('\n')
-            subject = "各市町村への連絡"
-            content = "市町村への連絡"
-
-            for line in lines:
-                if line.startswith("件名:"):
-                    subject = line.replace("件名:", "").strip()
-                elif line.startswith("CSV内容:"):
-                    content = line.replace("CSV内容:", "").strip()
-
-            return subject, content
-
-        except Exception as e:
-            print(f"CSV内容生成エラー: {e}")
-            return "各市町村への連絡", "市町村への連絡"
 
     def _generate_acknowledgment_message(self, context: List[Dict], task_type: str) -> str:
         """Playerへの了解メッセージを生成"""
@@ -757,27 +676,44 @@ CSV内容: （内容）
             return f"{municipality_name}です。市長のご指示、承知いたしました。連携して対応いたします。"
 
     def _generate_department_message(self, context: List[Dict]) -> str:
-        """別LLMで各部署向けメッセージを生成（会話履歴から判断）"""
+        """別LLMで全職員向け一斉連絡メッセージを生成（会話履歴から判断）"""
         try:
             # 最新の会話履歴から文脈を抽出
             recent_messages = context[-5:] if len(context) > 5 else context
             context_str = "\n".join([f"{msg.get('role', '')}: {msg.get('content', '')}" for msg in recent_messages])
 
             prompt = f"""
-あなたは市長です。以下の会話履歴を踏まえて、各部署（危機管理室、物資管理班、建物・土木対策班）への一斉連絡メッセージを作成してください。
+あなたは市長です。以下の会話履歴を踏まえて、全職員への一斉連絡メッセージを作成してください。
 
 会話履歴:
 {context_str}
 
 要件:
-- 市長からの重要な指示であることを明確に
-- 各部署の全職員（Manager、Worker全員）に向けた内容
-- 会話の文脈から判断して、各部署が取るべき行動を具体的に指示
-- 緊急度や優先順位があれば明記
-- 部署間の連携が必要な場合はその旨を記載
+- 市長からの全職員への重要な指示であることを明確に
+- まず全部署共通の基本方針や緊急事態宣言を伝える
+- 必要に応じて特定の班（危機管理室、物資管理班、建物・土木対策班）への追加指示を含める
+- 緊急度や現在の状況認識を共有
+- 全職員が理解すべき基本事項を伝達
 - 300文字以内で
+- システム的な文言（ツール名、実行、指示、追加など）は一切含めない
+- 括弧付きの説明文言（共通指示）（追加指示）などは出力しない
+- 全職員が直接聞く自然な指示内容のみを出力
 
-各部署の全職員向けメッセージ:
+出力形式例:
+全職員へ
+緊急事態を宣言します。全員で市民の安全確保を最優先に行動してください。
+
+特定班への追加指示がある場合:
+危機管理室へ
+情報収集と広報を担当してください。
+
+物資管理班へ
+避難所への物資配布を開始してください。
+
+建物・土木対策班へ
+被害状況の調査を実施してください。
+
+全職員向けメッセージ:
 """
 
             response = self.client.chat.completions.create(
@@ -785,11 +721,11 @@ CSV内容: （内容）
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            return f"【市長からの全職員への指示】\n{response.choices[0].message.content.strip()}"
+            return response.choices[0].message.content.strip()
 
         except Exception as e:
             print(f"各部署向けメッセージ生成エラー: {e}")
-            return "【市長からの全職員への指示】\n各部署は現在の状況に応じて適切に対応してください。"
+            return "各部署は現在の状況に応じて適切に対応してください。"
 
     def create_tool_response(self, tool_name: str, args: Dict = None) -> str:
         """ツール実行結果からレスポンスメッセージを作成"""
@@ -928,7 +864,7 @@ CSV内容: （内容）
             "type": "function",
             "function": {
                 "name": "broadcast_to_departments",
-                "description": "各部署への一斉連絡を実施する。情報管理室、物資管理班、建物・産業・土木対策班に同時に連絡される。会話の文脈から内容を判断して連絡する。",
+                "description": "各部署への一斉連絡を実施する。情報管理室、物資管理班、建物・土木対策班に同時に連絡される。会話の文脈から内容を判断して連絡する。",
                 "parameters": {
                     "type": "object",
                     "properties": {

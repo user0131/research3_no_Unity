@@ -13,7 +13,7 @@ from tools.infrastructure_task import InfrastructureInspectionTool
 
 
 class InfrastructureManager:
-    """建物・産業・土木対策担当者クラス"""
+    """建物・土木対策担当者クラス"""
 
     def __init__(self, client: OpenAI, time_manager):
         self.client = client
@@ -45,7 +45,7 @@ class InfrastructureManager:
         workers_status = self._get_workers_status()
 
         return f"""
-あなたは"Player"と一緒に災害対応の仕事を行う災害対応職員です。あなたは建物・産業・土木対策担当の職員です。あなたは"infrastructure_manager"です。
+あなたは"Player"と一緒に災害対応の仕事を行う災害対応職員です。あなたは建物・土木対策担当の職員です。あなたは"infrastructure_manager"です。
 地震を想定した避難訓練を"Player"と行っています。
 
 ## 災害対応ルール：
