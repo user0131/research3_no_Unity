@@ -110,16 +110,19 @@ const Chat: React.FC<ChatProps> = ({ selectedManager, selectedChatPerson: extern
       messageToSend = `/${selectedManager}_manager/${inputMessage}`;
     }
 
-    setInputMessage('');
-    setIsLoading(true);
+    const currentMessage = inputMessage;
+    setInputMessage(''); // 送信後すぐに入力欄をクリア
     setShouldAutoScroll(true);
 
     try {
+      setIsLoading(true);
       const response = await api.sendMessage(messageToSend);
       setCurrentTime(response.data.current_time);
       await loadHistory();
     } catch (error) {
       console.error('メッセージ送信エラー:', error);
+      // エラーの場合は入力内容を復元
+      setInputMessage(currentMessage);
     } finally {
       setIsLoading(false);
     }
@@ -260,7 +263,6 @@ const Chat: React.FC<ChatProps> = ({ selectedManager, selectedChatPerson: extern
           onChange={(e) => setInputMessage(e.target.value)}
           onKeyDown={handleKeyPress}
           placeholder="メッセージを入力..."
-          disabled={isLoading}
           className="message-input"
         />
         <button

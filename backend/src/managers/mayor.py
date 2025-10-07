@@ -40,7 +40,7 @@ class Mayor:
 - **重要：ツールの使用**: 実際の作業は必ずツールを使って実行してください。会話（テキスト応答）では作業を実行できません。
   - **市民への広報・避難指示**: public_announcementツールを使用
   - **知事との連絡**: contact_governorツールを使用
-  - **府下市町村との連絡**: contact_municipalitiesツールを使用
+  - **府下市町村長との連絡**: contact_municipalitiesツールを使用
   - **各部署への一斉連絡**: broadcast_to_departmentsツールを使用。情報管理室・物資管理班・建物・土木対策班に同時に連絡される
   - **CSV内容表示**: show_csv_contentツールを使用（単一または複数ファイル対応、確認系なので許可不要）
   - **CSV一覧表示**: list_all_csv_filesツールを使用（全ファイル一覧、確認系なので許可不要）
@@ -172,36 +172,45 @@ class Mayor:
         return f"知事への連絡を実施しました。"
 
     def _execute_contact_municipalities(self, context: List[Dict], target_municipalities: List[str] = None) -> str:
-        """府下市町村との連絡を実行"""
+        """府下市町村長との連絡を実行"""
         import pandas as pd
 
-        # 対象市町村のデフォルト設定
+        # 対象市町村長のデフォルト設定
         if target_municipalities is None:
-            target_municipalities = ["全市町村"]
+            target_municipalities = ["全市町村長"]
+
+        # 空のリストや重複を除外
+        if isinstance(target_municipalities, list):
+            target_municipalities = list(set([m for m in target_municipalities if m and m.strip()]))
+
+        if not target_municipalities:
+            target_municipalities = ["全市町村長"]
 
         # Playerへの了解メッセージを送信
-        acknowledgment = self._generate_acknowledgment_message(context, "市町村への連絡")
+        acknowledgment = self._generate_acknowledgment_message(context, "市町村長への連絡")
         if self.manager:
             self.manager.add_message("assistant", "mayor", acknowledgment, "mayor",
                                    from_person="mayor", to_person="Player")
 
-        # 別LLMで市町村向けメッセージを作成（会話履歴から判断）
+        # 別LLMで市町村長向けメッセージを作成（会話履歴から判断）
         municipality_message = self._generate_municipality_message_from_context(context, target_municipalities)
 
-        # 市町村への連絡メッセージを送信
+        # 市町村長への連絡メッセージを送信
         if self.manager:
-            for municipality in target_municipalities:
-                self.manager.add_message("system", "mayor", municipality_message, "mayor",
-                                       from_person="市長", to_person=municipality)
+            # まとめて連絡メッセージを送信
+            municipalities_str = "、".join(target_municipalities)
+            self.manager.add_message("system", "mayor", municipality_message, "mayor",
+                                   from_person="市長", to_person=municipalities_str)
 
-                # 各市町村からの了解返信を生成・送信
+            # 各市町村長からの了解返信を生成・送信
+            for municipality in target_municipalities:
                 municipality_reply = self._generate_municipality_reply(municipality_message, municipality)
                 self.manager.add_message("system", municipality, municipality_reply, "mayor",
                                        from_person=municipality, to_person="市長")
 
-        # 市町村向けメッセージの内容をそのままCSVに記録
+        # 市町村長向けメッセージの内容をそのままCSVに記録
         # CSVファイルパス
-        csv_path = self.csv_base_path / "【市長専用】市町村連絡記録.csv"
+        csv_path = self.csv_base_path / "【市長専用】市町村長連絡記録.csv"
 
         # 現在時刻を取得
         current_time = self.time_manager.get_current_time()
@@ -209,7 +218,7 @@ class Mayor:
         # 新しい記録
         new_record = {
             "連絡日時": current_time,
-            "件名": "府下市町村への連絡",
+            "件名": "府下市町村長への連絡",
             "内容": municipality_message,
             "発信者": "市長",
             "宛先": ", ".join(target_municipalities)
@@ -220,7 +229,7 @@ class Mayor:
         df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
         df.to_csv(csv_path, index=False, encoding='utf-8')
 
-        return f"府下市町村への連絡を実施しました。"
+        return f"府下市町村長への連絡を実施しました。"
 
     def _execute_broadcast_to_departments(self, context: List[Dict], departments: List[str] = None) -> str:
         """各部署への一斉連絡を実行"""
@@ -275,9 +284,9 @@ class Mayor:
             elif tool_name == "contact_municipalities":
                 municipalities = args.get("target_municipalities", [])
                 if municipalities:
-                    args_text = f"市町村への連絡を実行（対象: {len(municipalities)}市町村）"
+                    args_text = f"市町村長への連絡を実行（対象: {len(municipalities)}市町村長）"
                 else:
-                    args_text = "市町村への連絡を実行（全市町村）"
+                    args_text = "市町村長への連絡を実行（全市町村長）"
             elif tool_name == "broadcast_to_departments":
                 departments = args.get("departments", [])
                 if departments:
@@ -523,12 +532,12 @@ class Mayor:
 {context_str}
 
 要件:
-- 電話での会話として適切な敬語で
+- 会話として適切な敬語で
 - 簡潔で要点を明確に
 - 具体的な状況や要請があれば明記
 - 300文字以内で
 - システム的な文言（ツール名、実行など）は一切含めない
-- 府知事との電話での自然な会話内容のみを出力
+- 府知事との自然な会話内容のみを出力
 
 府知事向けメッセージ:
 """
@@ -546,14 +555,14 @@ class Mayor:
 
 
     def _generate_municipality_message_from_context(self, context: List[Dict], target_municipalities: List[str]) -> str:
-        """別LLMで市町村向けメッセージを生成（会話履歴から判断）"""
+        """別LLMで市町村長向けメッセージを生成（会話履歴から判断）"""
         try:
             municipalities_str = "、".join(target_municipalities)
             recent_messages = context[-5:] if len(context) > 5 else context
             context_str = "\n".join([f"{msg.get('role', '')}: {msg.get('content', '')}" for msg in recent_messages])
 
             prompt = f"""
-あなたは市長です。以下の会話履歴を踏まえて、府下市町村（{municipalities_str}）への電話連絡内容を作成してください。
+あなたは市長です。以下の会話履歴を踏まえて、府下市町村長（{municipalities_str}）への連絡内容を作成してください。
 
 会話履歴:
 {context_str}
@@ -561,14 +570,15 @@ class Mayor:
 対象: {municipalities_str}
 
 要件:
+- Playerが事前に確認・了承した内容に基づいて作成
+- 会話履歴で確認された具体的な内容をそのまま使用
 - 電話での会話として自治体間の連携を意識した表現で
 - 協力要請や情報共有の目的を明確に
-- 具体的で実用的な内容で
-- 簡潔に
+- 簡潔で自然な会話内容
 - システム的な文言（ツール名、実行など）は一切含めない
-- 市町村との電話での自然な会話内容のみを出力
+- 市町村長との自然な会話内容のみを出力
 
-市町村向けメッセージ:
+市町村長向けメッセージ:
 """
 
             response = self.client.chat.completions.create(
@@ -579,9 +589,44 @@ class Mayor:
             return response.choices[0].message.content.strip()
 
         except Exception as e:
-            print(f"市町村向けメッセージ生成エラー: {e}")
-            return "各市町村への重要な連絡です。"
+            print(f"市町村長向けメッセージ生成エラー: {e}")
+            return "各市町村長への重要な連絡です。"
 
+    def _generate_individual_municipality_message(self, context: List[Dict], municipality: str) -> str:
+        """個別の市町村長向けメッセージを生成"""
+        try:
+            recent_messages = context[-5:] if len(context) > 5 else context
+            context_str = "\n".join([f"{msg.get('role', '')}: {msg.get('content', '')}" for msg in recent_messages])
+
+            prompt = f"""
+あなたは市長です。以下の会話履歴を踏まえて、{municipality}長への電話連絡内容を作成してください。
+
+会話履歴:
+{context_str}
+
+対象: {municipality}
+
+要件:
+- 電話での会話として自治体間の連携を意識した表現で
+- 協力要請や情報共有の目的を明確に
+- 具体的で実用的な内容で
+- 簡潔に
+- システム的な文言（ツール名、実行など）は一切含めない
+- {municipality}長との自然な会話内容のみを出力
+
+{municipality}長向けメッセージ:
+"""
+
+            response = self.client.chat.completions.create(
+                model="gpt-5-mini",
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            print(f"{municipality}向けメッセージ生成エラー: {e}")
+            return f"{municipality}長への重要な連絡です。"
 
     def _generate_acknowledgment_message(self, context: List[Dict], task_type: str) -> str:
         """Playerへの了解メッセージを生成"""
@@ -647,7 +692,7 @@ class Mayor:
             return "市長のご連絡、承知いたしました。府としても全力で協力いたします。"
 
     def _generate_municipality_reply(self, sent_message: str, municipality_name: str) -> str:
-        """市町村からの了解返信メッセージを生成"""
+        """市町村長からの了解返信メッセージを生成"""
         try:
             prompt = f"""
 あなたは{municipality_name}の担当者です。以下の市長からのメッセージを受けて、了解した旨の返信を作成してください。
@@ -672,7 +717,7 @@ class Mayor:
             return response.choices[0].message.content.strip()
 
         except Exception as e:
-            print(f"市町村返信生成エラー: {e}")
+            print(f"市町村長返信生成エラー: {e}")
             return f"{municipality_name}です。市長のご指示、承知いたしました。連携して対応いたします。"
 
     def _generate_department_message(self, context: List[Dict]) -> str:
@@ -788,7 +833,7 @@ class Mayor:
                     result = self._execute_contact_governor(subject, content)
                 return_message = f"{task_name}から戻りました！\n{result}"
                 self.pending_task_args = None
-            elif task_name == "市町村連絡" and self.pending_task_args:
+            elif task_name == "市町村長連絡" and self.pending_task_args:
                 if isinstance(self.pending_task_args, dict):
                     subject = self.pending_task_args.get("subject", "")
                     content = self.pending_task_args.get("content", "")
@@ -839,19 +884,19 @@ class Mayor:
             }
         })
 
-        # 府下市町村との連絡
+        # 府下市町村長との連絡
         defs.append({
             "type": "function",
             "function": {
                 "name": "contact_municipalities",
-                "description": "府下市町村との連絡を実施する。会話の文脈から内容を判断して連絡する。",
+                "description": "府下市町村長との連絡を実施する。会話の文脈から内容を判断して連絡する。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "target_municipalities": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "連絡対象の市町村名リスト（省略時は全市町村）"
+                            "description": "連絡対象の市町村長名リスト（省略時は全市町村長）"
                         }
                     },
                     "required": []
