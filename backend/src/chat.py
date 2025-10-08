@@ -26,7 +26,7 @@ class ChatWithMemory:
         self.conversation_history: List[Dict[str, str]] = []
         self.inf_provider = InfProvider()  # タスク管理システムを初期化
         # 時刻管理システムを初期化（callbackで付与情報をチェック） 時間が変更すればこれを実施する
-        self.time_manager = TimeManager(start_time="10:30", callback=self.check_scheduled_infos, speed_multiplier=3.0)
+        self.time_manager = TimeManager(start_time="10:30", callback=self.check_scheduled_infos, speed_multiplier=1.0)
         # 各マネージャーを初期化
         self.info_manager = InformationManager(self.client, self.time_manager)
         self.supply_manager = SupplyManager(self.client, self.time_manager)
@@ -344,24 +344,30 @@ class ChatWithMemory:
                     key = (info.target_team, info.source)
                     grouped_infos[key].append(info)
 
-            # グループ化された情報をまとめてPlayerに報告
+            # グループ化された情報をマネージャーに付与し、利用可能な場合のみPlayerに報告
             for (target_team, source), info_list in grouped_infos.items():
                 if target_team == "supply_team":
-                    # 複数の場合はリスト、単一の場合はタプルで渡す
+                    # 情報付与は常に実行（マネージャーの知識に追加）
                     if len(info_list) > 1:
                         manager_response = self.supply_manager.handle_system_information(source, info_list)
                     else:
                         info = info_list[0]
                         manager_response = self.supply_manager.handle_system_information(source, (info.subject, info.content))
-                    self.add_message("assistant", "supply_manager", manager_response, "supply", from_person="supply_manager", to_person="Player")
+
+                    # Playerへの返信は利用可能な場合のみ
+                    if self.supply_manager.check_if_available() is None:
+                        self.add_message("assistant", "supply_manager", manager_response, "supply", from_person="supply_manager", to_person="Player")
                 elif target_team == "infrastructure_team":
-                    # 複数の場合はリスト、単一の場合はタプルで渡す
+                    # 情報付与は常に実行（マネージャーの知識に追加）
                     if len(info_list) > 1:
                         manager_response = self.infrastructure_manager.handle_system_information(source, info_list)
                     else:
                         info = info_list[0]
                         manager_response = self.infrastructure_manager.handle_system_information(source, (info.subject, info.content))
-                    self.add_message("assistant", "infrastructure_manager", manager_response, "infrastructure", from_person="infrastructure_manager", to_person="Player")
+
+                    # Playerへの返信は利用可能な場合のみ
+                    if self.infrastructure_manager.check_if_available() is None:
+                        self.add_message("assistant", "infrastructure_manager", manager_response, "infrastructure", from_person="infrastructure_manager", to_person="Player")
 
             print()
         return len(infos) > 0

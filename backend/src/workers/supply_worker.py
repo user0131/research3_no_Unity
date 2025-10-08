@@ -54,103 +54,140 @@ class SupplyWorker(BaseWorker):
 
     # 配送機能
     def _deliver_supplies(self) -> Dict[str, Any]:
-        """物資配送記録と在庫更新"""
+        """物資配送記録と在庫更新（単一・複数物資対応）"""
         shelter_name = self.task_data.get("shelter_name", "")
-        item_name = self.task_data.get("item_name", "")
-        quantity = self.task_data.get("quantity", 0)
-        unit = self.task_data.get("unit", "")
+        items = self.task_data.get("items", [])
+
+
+        if not items:
+            return {"success": False, "message": "配送する物資が指定されていません"}
 
         try:
-            # 在庫情報を取得
-            row_index = None
-            current_stock = 0
-            item_found = False
+            # 複数物資の在庫チェックと配送処理
+            inventory_data = []
+            failed_items = []
+            processed_items = []
 
+            # 在庫情報を読み込み
             with open(self.inventory_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
-                for idx, row in enumerate(reader):
+                inventory_data = list(reader)
+
+            # 各物資の在庫確認
+            for item in items:
+                item_name = item.get("item_name", "")
+                quantity = item.get("quantity", 0)
+
+                row_index = None
+                current_stock = 0
+                unit = ""
+                item_found = False
+
+                for idx, row in enumerate(inventory_data):
                     if item_name in row['物資名']:
                         row_index = idx
                         current_stock = int(row['在庫数'])
-                        if not unit:
-                            unit = row['単位']
+                        unit = row['単位']
                         item_found = True
                         break
 
-            # 物資が見つからない場合
-            if not item_found:
+                # 物資が見つからない場合
+                if not item_found:
+                    failed_items.append({
+                        "item": item_name,
+                        "reason": f"{item_name}は在庫リストに存在しません",
+                        "type": "item_not_found"
+                    })
+                    continue
+
+                # 在庫不足チェック
+                if current_stock < quantity:
+                    shortage_amount = quantity - current_stock
+                    if current_stock == 0:
+                        failed_items.append({
+                            "item": item_name,
+                            "reason": f"{item_name}の在庫が完全にありません（要請: {quantity}{unit}）",
+                            "type": "no_stock"
+                        })
+                    else:
+                        failed_items.append({
+                            "item": item_name,
+                            "reason": f"{item_name}の在庫が{current_stock}{unit}しかありません（要請: {quantity}{unit}、不足: {shortage_amount}{unit}）",
+                            "type": "insufficient_stock"
+                        })
+                    continue
+
+                # 在庫が十分にある場合
+                processed_items.append({
+                    "item_name": item_name,
+                    "quantity": quantity,
+                    "unit": unit,
+                    "row_index": row_index,
+                    "current_stock": current_stock
+                })
+
+            # 一つでも失敗があれば全体を失敗とする
+            if failed_items:
+                failed_reasons = [f"・{item['reason']}" for item in failed_items]
                 return {
                     "success": False,
-                    "message": f"エラー: {item_name}は在庫リストに存在しません",
-                    "shortage_type": "item_not_found",
-                    "requested": {"item": item_name, "quantity": quantity}
+                    "message": f"在庫不足により配送できません:\n" + "\n".join(failed_reasons),
+                    "shortage_type": "multiple_issues",
+                    "failed_items": failed_items
                 }
 
-            # 在庫不足チェック
-            if current_stock < quantity:
-                shortage_amount = quantity - current_stock
-                if current_stock == 0:
-                    return {
-                        "success": False,
-                        "message": f"在庫不足: {item_name}の在庫が完全にありません（要請: {quantity}{unit}）",
-                        "shortage_type": "no_stock",
-                        "requested": {"item": item_name, "quantity": quantity, "unit": unit},
-                        "available": {"quantity": 0, "unit": unit}
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "message": f"在庫不足: {item_name}の在庫が{current_stock}{unit}しかありません（要請: {quantity}{unit}、不足: {shortage_amount}{unit}）",
-                        "shortage_type": "insufficient_stock",
-                        "requested": {"item": item_name, "quantity": quantity, "unit": unit},
-                        "available": {"quantity": current_stock, "unit": unit},
-                        "shortage": {"quantity": shortage_amount, "unit": unit}
-                    }
+            # 全ての物資が配送可能な場合、在庫を更新
+            update_cells = []
+            for item in processed_items:
+                new_stock = item["current_stock"] - item["quantity"]
+                update_cells.append({
+                    "row_index": item["row_index"],
+                    "column": "在庫数",
+                    "value": str(new_stock)
+                })
 
-            # 在庫が十分にある場合のみ配送処理を実行
-            if row_index is not None:
-                new_stock = current_stock - quantity
+            # 在庫を一括更新
+            if update_cells:
                 update_csv_from_knowledge(
                     update_spec={
                         "filename": "物資在庫情報.csv",
-                        "update_cells": [
-                            {"row_index": row_index, "column": "在庫数", "value": str(new_stock)}
-                        ]
+                        "update_cells": update_cells
                     },
                     knowledge_path=str(self.knowledge_path),
                     time_manager=self.time_manager
                 )
 
-            # 配送記録を追加
+            # 配送記録を一括追加
+            delivery_objects = []
+            for item in processed_items:
+                delivery_objects.append({
+                    "避難所名": shelter_name,
+                    "物資名": item["item_name"],
+                    "数量": str(item["quantity"]),
+                    "単位": item["unit"],
+                    "備考": "避難所要請対応"
+                })
+
             update_csv_from_knowledge(
                 update_spec={
                     "filename": "物資配送記録.csv",
-                    "append_rows": [
-                        {
-                            "objects": [
-                                {
-                                    "避難所名": shelter_name,
-                                    "物資名": item_name,
-                                    "数量": str(quantity),
-                                    "単位": unit,
-                                    "備考": "避難所要請対応"
-                                }
-                            ]
-                        }
-                    ]
+                    "append_rows": [{"objects": delivery_objects}]
                 },
                 knowledge_path=str(self.knowledge_path),
                 time_manager=self.time_manager
             )
 
+            # 成功メッセージを作成
+            delivered_items = [f"{item['item_name']} {item['quantity']}{item['unit']}" for item in processed_items]
+            items_text = "、".join(delivered_items)
+
             return {
                 "success": True,
-                "message": f"{shelter_name}への{item_name} {quantity}{unit}の配送を完了し、在庫を更新しました",
+                "message": f"{shelter_name}への{items_text}の配送を完了し、在庫を更新しました",
                 "delivery_details": {
                     "shelter": shelter_name,
-                    "item": item_name,
-                    "quantity": quantity,
-                    "unit": unit
+                    "items": processed_items,
+                    "total_items": len(processed_items)
                 }
             }
         except Exception as e:
@@ -282,7 +319,7 @@ class SupplyWorker(BaseWorker):
 
             return response.choices[0].message.content
 
-        except Exception as e:
+        except Exception:
             # LLM呼び出しが失敗した場合のフォールバック
             if task_result.get("success", False):
                 return f"{self.worker_name}です。{self.current_task}が完了しました。{task_result.get('message', '')}"

@@ -196,9 +196,11 @@ def get_managers_status():
         chat = get_chat_instance()
 
         # 各マネージャーの状態を取得
+        info_away_message = chat.info_manager.check_if_available()
         info_status = {
             "name": "危機管理室",
-            "available": not chat.info_manager.away_from_desk,
+            "available": info_away_message is None,
+            "away_message": info_away_message,
             "in_conversation": chat.info_manager.in_conversation,
             "memory": {
                 "csv_data": list(chat.info_manager.csv_manager.csv_data.keys()) if hasattr(chat.info_manager, 'csv_manager') else [],
@@ -206,9 +208,12 @@ def get_managers_status():
             }
         }
 
+        # supply_managerの離席状況をチェック
+        supply_away_message = chat.supply_manager.check_if_available()
         supply_status = {
             "name": "物資管理班",
-            "available": not chat.supply_manager.away_from_desk,
+            "available": supply_away_message is None,
+            "away_message": supply_away_message,
             "in_conversation": chat.supply_manager.in_conversation,
             "memory": {
                 "csv_data": list(chat.supply_manager.csv_manager.csv_data.keys()) if hasattr(chat.supply_manager, 'csv_manager') else [],
@@ -239,7 +244,7 @@ def get_manager_debug_data():
                 "name": "危機管理室",
                 "class": "InformationManager",
                 "status": {
-                    "available": not getattr(chat.info_manager, 'away_from_desk', False),
+                    "available": chat.info_manager.check_if_available() is None,
                     "in_conversation": getattr(chat.info_manager, 'in_conversation', False),
                     "away_reason": getattr(chat.info_manager, 'away_reason', None)
                 },
@@ -317,7 +322,7 @@ def get_manager_debug_data():
                 "name": "物資管理班",
                 "class": "SupplyManager",
                 "status": {
-                    "available": not getattr(chat.supply_manager, 'away_from_desk', False),
+                    "available": chat.supply_manager.check_if_available() is None,
                     "in_conversation": getattr(chat.supply_manager, 'in_conversation', False),
                     "away_reason": getattr(chat.supply_manager, 'away_reason', None)
                 },
@@ -397,7 +402,7 @@ def get_manager_debug_data():
                 "name": "建物・土木対策班",
                 "class": "InfrastructureManager",
                 "status": {
-                    "available": not getattr(chat.infrastructure_manager, 'away_from_desk', False),
+                    "available": chat.infrastructure_manager.check_if_available() is None,
                     "in_conversation": getattr(chat.infrastructure_manager, 'in_conversation', False),
                     "away_reason": getattr(chat.infrastructure_manager, 'away_reason', None)
                 },
@@ -473,7 +478,7 @@ def get_manager_debug_data():
                 "name": "市長",
                 "class": "Mayor",
                 "status": {
-                    "available": not getattr(chat.mayor, 'away_from_desk', False),
+                    "available": chat.mayor.check_if_available() is None,
                     "in_conversation": getattr(chat.mayor, 'in_conversation', False),
                     "away_reason": getattr(chat.mayor, 'away_reason', None)
                 },

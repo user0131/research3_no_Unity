@@ -15,6 +15,7 @@ const Chat: React.FC<ChatProps> = ({ selectedManager, selectedChatPerson: extern
   const [isLoading, setIsLoading] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
+  const [managerStatus, setManagerStatus] = useState<any>(null);
   const [internalSelectedPerson, setInternalSelectedPerson] = useState<string>(() => {
     if (selectedManager === 'information') {
       return localStorage.getItem(`selectedChatPerson_${selectedManager}`) || 'information_manager';
@@ -49,9 +50,20 @@ const Chat: React.FC<ChatProps> = ({ selectedManager, selectedChatPerson: extern
       loadHistory();
     }, 1000);
 
+    // マネージャーステータスを定期的に更新（3秒ごと）
+    const statusInterval = setInterval(async () => {
+      try {
+        const response = await api.getManagersStatus();
+        setManagerStatus(response.data);
+      } catch (error) {
+        console.error('マネージャーステータス更新エラー:', error);
+      }
+    }, 3000);
+
     return () => {
       clearInterval(timeInterval);
       clearInterval(historyInterval);
+      clearInterval(statusInterval);
     };
   }, [selectedManager, selectedPerson]);
 
@@ -100,8 +112,49 @@ const Chat: React.FC<ChatProps> = ({ selectedManager, selectedChatPerson: extern
     }
   };
 
+  // マネージャーが利用可能かチェック
+  const isManagerAvailable = () => {
+    if (!managerStatus) return true; // まだ状態が取得できていない場合は送信可能とする
+
+    if (selectedManager === 'information') {
+      if (selectedPerson === 'mayor') {
+        // 市長の場合はmanagerStatus内に情報がないため、一旦送信可能とする
+        return true;
+      } else {
+        return managerStatus.information_manager?.available || false;
+      }
+    } else if (selectedManager === 'supply') {
+      return managerStatus.supply_manager?.available || false;
+    } else if (selectedManager === 'infrastructure') {
+      return managerStatus.infrastructure_manager?.available || false;
+    }
+
+    return true;
+  };
+
+  // マネージャーが利用不可の場合のメッセージを取得
+  const getUnavailableMessage = () => {
+    if (!managerStatus) return '';
+
+    if (selectedManager === 'information') {
+      return managerStatus.information_manager?.away_message || 'ただいま作業中で会話できません';
+    } else if (selectedManager === 'supply') {
+      return managerStatus.supply_manager?.away_message || 'ただいま作業中で会話できません';
+    } else if (selectedManager === 'infrastructure') {
+      return managerStatus.infrastructure_manager?.away_message || 'ただいま作業中で会話できません';
+    }
+
+    return 'ただいま作業中で会話できません';
+  };
+
   const sendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
+
+    // マネージャーの利用可能性をチェック
+    if (!isManagerAvailable()) {
+      alert(getUnavailableMessage());
+      return;
+    }
 
     let messageToSend: string;
     if (selectedManager === 'information' && selectedPerson === 'mayor') {
@@ -262,15 +315,17 @@ const Chat: React.FC<ChatProps> = ({ selectedManager, selectedChatPerson: extern
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
           onKeyDown={handleKeyPress}
-          placeholder="メッセージを入力..."
+          placeholder={!isManagerAvailable() ? getUnavailableMessage() : "メッセージを入力..."}
+          disabled={!isManagerAvailable()}
           className="message-input"
         />
         <button
           onClick={sendMessage}
-          disabled={isLoading || !inputMessage.trim()}
+          disabled={isLoading || !inputMessage.trim() || !isManagerAvailable()}
           className="send-button"
+          title={!isManagerAvailable() ? getUnavailableMessage() : ''}
         >
-          送信
+          {!isManagerAvailable() ? '作業中' : '送信'}
         </button>
       </div>
     </div>

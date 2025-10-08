@@ -95,6 +95,10 @@ class SupplyManager:
 
 ## 重要
 - 極力あなた(supply_manager)自身が作業を行うことは避けてください。workerの手が空いていない場合は、Playerにそのことを伝え、それでもやってほしいと頼まれた場合にあなた自身が作業をしてください。
+- **マネージャー自身が作業する場合の特別な対応**:
+  - 作業を依頼された時、全てのワーカーが忙しい場合は「全員作業中のため、私自身が実行する必要があります。離席中は他の対応ができませんが、実行してよろしいですか？」のように確認を求めてください
+  - 確認を得てから「分かりました。私が直接行ってきます」のように返答し、ツールを実行してください
+  - 「部下に依頼します」「手配します」等の表現は使わないでください
 - ユーザに聞かれたこと以外は極力返さないように。
 - 物資配送や、物資調達のツールでは、Playerに対してツール実行の報告も関数内で行います。物資配送や、物資調達のツールを使う際に、Playerに会話を返答する必要なありません。
 - Playerから伝えられたことを実行するために、タスクを工夫する必要はありません。Playerから言われたことがシンプルにできない場合は、できない理由を簡潔にPlayerに伝えるだけで大丈夫です。
@@ -143,10 +147,10 @@ Playerに対しては「手配します」「対応します」のように、�
             args_text = ""
             if tool_name == "deliver_supplies":
                 shelter = args.get("shelter_name", "")
-                item = args.get("item_name", "")
-                quantity = args.get("quantity", 0)
+                items = args.get("items", [])
                 worker = args.get("assigned_worker", "")
-                args_text = f"避難所: {shelter}, 物資: {item}, 数量: {quantity}, 担当: {worker}"
+                items_text = ", ".join([f"{item.get('item_name', '')} {item.get('quantity', 0)}個" for item in items])
+                args_text = f"避難所: {shelter}, 物資: {items_text}, 担当: {worker}"
             elif tool_name == "procure_supplies":
                 item = args.get("item_name", "")
                 quantity = args.get("quantity", 0)
@@ -288,7 +292,28 @@ Playerに対しては「手配します」「対応します」のように、�
         try:
             client = self.client
 
-            conversion_prompt = f"""
+            # マネージャー自身かワーカーかを判定
+            assigned_worker = args.get("assigned_worker", "")
+            is_manager_task = assigned_worker == "マネージャー自身"
+
+            if is_manager_task:
+                conversion_prompt = f"""
+あなたはsupply_managerです。あなた自身が作業を実行したところ、以下の結果になりました。
+
+タスク: {function_name}
+引数: {args}
+実行結果: {worker_response}
+
+この結果をPlayerに伝える際、以下の点に注意してください：
+- 「私が直接行ってきます」「私自身で実行します」のような表現を使う
+- 「部下に依頼」「手配します」等の表現は使わない
+- 技術的な用語は自然な日本語に変換
+- 簡潔に、話し言葉で
+
+短く簡潔に、話し言葉で返してください。
+"""
+            else:
+                conversion_prompt = f"""
 あなたはsupply_managerです。部下に作業を依頼したところ、以下の応答がありました。
 
 タスク: {function_name}
@@ -329,13 +354,13 @@ Playerに対しては「手配します」「対応します」のように、�
 
                     if tool_call.function.name == "deliver_supplies":
                         shelter = args.get("shelter_name", "避難所")
-                        item = args.get("item_name", "物資")
-                        quantity = args.get("quantity", 0)
-                        tasks_summary.append(f"{shelter}への{item}{quantity}")
+                        items = args.get("items", [])
+                        items_text = "、".join([f"{item.get('item_name', '')} {item.get('quantity', 0)}個" for item in items])
+                        tasks_summary.append(f"{shelter}への{items_text}")
                     elif tool_call.function.name == "procure_supplies":
                         item = args.get("item_name", "物資")
                         quantity = args.get("quantity", 0)
-                        tasks_summary.append(f"{item}{quantity}の調達")
+                        tasks_summary.append(f"{item} {quantity}個の調達")
 
             summary_prompt = f"""
 あなたはsupply_managerです。以下のタスクを完了しました。
@@ -460,15 +485,37 @@ Playerに対して、これらのタスクの手配が完了したことを報�
 
                 if tool_call.function.name == "deliver_supplies":
                     shelter = args.get("shelter_name", "避難所")
-                    item = args.get("item_name", "物資")
-                    quantity = args.get("quantity", 0)
-                    tasks_info.append(f"{shelter}への{item}{quantity}")
+                    items = args.get("items", [])
+                    items_text = ", ".join([f"{item.get('item_name', '')} {item.get('quantity', 0)}個" for item in items])
+                    tasks_info.append(f"{shelter}への{items_text}")
                 elif tool_call.function.name == "procure_supplies":
                     item = args.get("item_name", "物資")
                     quantity = args.get("quantity", 0)
-                    tasks_info.append(f"{item}{quantity}の調達")
+                    tasks_info.append(f"{item} {quantity}個の調達")
 
-            notification_prompt = f"""
+            # 最初のタスクの担当者をチェック（全て同じ担当者の想定）
+            first_task = execution_tasks[0] if execution_tasks else None
+            if first_task:
+                first_args = json.loads(first_task["tool_call"].function.arguments or "{}")
+                assigned_worker = first_args.get("assigned_worker", "")
+                is_manager_task = assigned_worker == "マネージャー自身"
+            else:
+                is_manager_task = False
+
+            if is_manager_task:
+                notification_prompt = f"""
+あなたはsupply_managerです。以下のタスクを自分自身で実行することになり、それをPlayerに報告することになりました。
+
+実行予定のタスク:
+{chr(10).join(f"- {task}" for task in tasks_info)}
+
+Playerに対して、これらの作業を今から自分で実行することを報告する自然な返答を作成してください。
+- 「私が直接〇〇と△△を行ってきます」のような形で表現
+- 「部下に依頼」「手配します」等の表現は使わない
+- 簡潔で話し言葉で作成してください
+"""
+            else:
+                notification_prompt = f"""
 あなたはsupply_managerです。以下の複数のタスクを部下に依頼することになり、それをPlayerに報告することになりました。
 
 実行予定のタスク:
@@ -488,10 +535,24 @@ Playerに対して、これらの作業を今から実行することを報告�
 
         except Exception:
             # フォールバック
-            if len(execution_tasks) == 1:
-                return "部下に作業を依頼します。"
+            first_task = execution_tasks[0] if execution_tasks else None
+            if first_task:
+                first_args = json.loads(first_task["tool_call"].function.arguments or "{}")
+                assigned_worker = first_args.get("assigned_worker", "")
+                is_manager_task = assigned_worker == "マネージャー自身"
             else:
-                return f"部下に{len(execution_tasks)}件の作業を依頼します。"
+                is_manager_task = False
+
+            if is_manager_task:
+                if len(execution_tasks) == 1:
+                    return "私が直接行ってきます。"
+                else:
+                    return f"私が直接{len(execution_tasks)}件の作業を行ってきます。"
+            else:
+                if len(execution_tasks) == 1:
+                    return "部下に作業を依頼します。"
+                else:
+                    return f"部下に{len(execution_tasks)}件の作業を依頼します。"
 
     def _generate_task_instruction(self, worker_name: str, function_name: str, args: Dict) -> str:
         """マネージャーからワーカーへのタスク指示を生成"""
@@ -553,10 +614,6 @@ Playerに対して、これらの作業を今から実行することを報告�
             else:
                 return f"（マネージャー自身で確認）{item_name}は在庫切れです。"
 
-        elif function_name == "deliver_supplies":
-            self.pending_delivery = args
-            return self.execute_task_with_delay("物資配送", args)
-
         elif function_name == "show_inventory":
             return f"（マネージャー自身で確認）{self.inventory_tool.get_inventory_summary()}"
 
@@ -579,7 +636,11 @@ Playerに対して、これらの作業を今から実行することを報告�
                     return f"（マネージャー自身で確認）配送記録が見つかりません。"
             except Exception:
                 return f"（マネージャー自身で確認）配送記録の読み込みに失敗しました。"
-
+            
+        elif function_name == "deliver_supplies":
+            self.pending_delivery = args
+            return self.execute_task_with_delay("物資配送", args)
+        
         elif function_name == "procure_supplies":
             self.pending_procurement = args
             return self.execute_task_with_delay("物資調達", args)
@@ -613,30 +674,44 @@ Playerに対して、これらの作業を今から実行することを報告�
             task_name = self.current_task_description or "業務"
 
             if task_name == "物資配送" and self.pending_delivery:
-                # 実際の配送処理
+                # 実際の配送処理（複数物資対応）
                 shelter = self.pending_delivery.get("shelter_name", "避難所")
-                item = self.pending_delivery.get("item_name", "物資")
-                quantity = self.pending_delivery.get("quantity", 0)
+                items = self.pending_delivery.get("items", [])
 
-                has_stock, stock, unit = self.inventory_tool.check_inventory(item)
-                if has_stock and stock >= quantity:
-                    # 在庫を減らす
-                    if self.inventory_tool.update_inventory(item, quantity):
-                        # 配送記録を追加
-                        self.inventory_tool.record_delivery(shelter, item, quantity, unit)
-                        task_result = {
-                            "success": True,
-                            "message": f"{shelter}に{item}を{quantity}{unit}配送完了しました。残在庫: {stock - quantity}{unit}"
-                        }
+                all_success = True
+                delivery_results = []
+                failed_items = []
+
+                # 各物資を処理
+                for item in items:
+                    item_name = item.get("item_name", "")
+                    quantity = item.get("quantity", 0)
+
+                    has_stock, stock, unit = self.inventory_tool.check_inventory(item_name)
+                    if has_stock and stock >= quantity:
+                        # 在庫を減らす
+                        if self.inventory_tool.update_inventory(item_name, quantity):
+                            # 配送記録を追加
+                            self.inventory_tool.record_delivery(shelter, item_name, quantity, unit)
+                            delivery_results.append(f"{item_name} {quantity}{unit}")
+                        else:
+                            all_success = False
+                            failed_items.append(f"{item_name}の在庫更新に失敗")
                     else:
-                        task_result = {
-                            "success": False,
-                            "message": "在庫更新に失敗しました。"
-                        }
+                        all_success = False
+                        failed_items.append(f"{item_name}の在庫不足（現在庫: {stock}{unit}、要求: {quantity}{unit}）")
+
+                if all_success:
+                    delivered_text = "、".join(delivery_results)
+                    task_result = {
+                        "success": True,
+                        "message": f"{shelter}に{delivered_text}の配送完了しました。"
+                    }
                 else:
+                    failed_text = "、".join(failed_items)
                     task_result = {
                         "success": False,
-                        "message": f"{item}の在庫が不足しています（現在庫: {stock}{unit}、要求: {quantity}{unit}）"
+                        "message": f"配送に失敗しました: {failed_text}"
                     }
 
                 self.pending_delivery = None
@@ -967,21 +1042,31 @@ Playerに対して、これらのタスクが完了したことを報告する�
             }
         })
 
-        # 物資配送（ワーカー指定可能）
+        # 物資配送（ワーカー指定可能）- 単一・複数物資対応
         defs.append({
             "type": "function",
             "function": {
                 "name": "deliver_supplies",
-                "description": "避難所に物資を配送する。重要：このツールは在庫確認して報告した後にのみ使用してください。在庫不足の場合は配送されません。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
+                "description": "避難所に物資を配送する。単一物資または複数物資の同時配送が可能。重要：このツールは在庫確認して報告した後にのみ使用してください。在庫不足の場合は配送されません。会話履歴から空いているワーカーを判断してタスクを依頼する。全員忙しい場合はマネージャー自身が実行。",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "shelter_name": {"type": "string", "description": "配送先の避難所名"},
-                        "item_name": {"type": "string", "description": "配送する物資名"},
-                        "quantity": {"type": "integer", "description": "配送数量"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["物資ワーカーA", "物資ワーカーB", "物資ワーカーC", "マネージャー自身"]}
+                        "items": {
+                            "type": "array",
+                            "description": "配送する物資のリスト。単一物資の場合も配列形式で指定",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "item_name": {"type": "string", "description": "物資名"},
+                                    "quantity": {"type": "integer", "description": "数量"}
+                                },
+                                "required": ["item_name", "quantity"]
+                            }
+                        },
+                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名。優先順位: 1)空いているワーカー、2)忙しいワーカー（待機）、3)最後の手段としてマネージャー自身（離席し、その間は他の対応不可）。マネージャー自身を選ぶ前に必ずPlayerに確認すること。", "enum": ["物資ワーカーA", "物資ワーカーB", "物資ワーカーC", "マネージャー自身"]}
                     },
-                    "required": ["shelter_name", "item_name", "quantity", "assigned_worker"]
+                    "required": ["shelter_name", "items", "assigned_worker"]
                 }
             }
         })
@@ -1027,7 +1112,7 @@ Playerに対して、これらのタスクが完了したことを報告する�
                     "properties": {
                         "item_name": {"type": "string", "description": "調達する物資名"},
                         "quantity": {"type": "integer", "description": "調達数量"},
-                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名（会話履歴から空いているワーカーを選択）", "enum": ["物資ワーカーA", "物資ワーカーB", "物資ワーカーC", "マネージャー自身"]}
+                        "assigned_worker": {"type": "string", "description": "タスクを依頼するワーカー名。優先順位: 1)空いているワーカー、2)忙しいワーカー（待機）、3)最後の手段としてマネージャー自身（離席し、その間は他の対応不可）。マネージャー自身を選ぶ前に必ずPlayerに確認すること。", "enum": ["物資ワーカーA", "物資ワーカーB", "物資ワーカーC", "マネージャー自身"]}
                     },
                     "required": ["item_name", "quantity", "assigned_worker"]
                 }
