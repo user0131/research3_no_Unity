@@ -25,6 +25,7 @@ class SupplyManager:
         self.current_task_description = None
         self.pending_delivery = None
         self.pending_procurement = None
+        self.pending_reports = []  # マネージャーが作業中に蓄積される報告
 
         # 在庫CSVファイルのパス（supplyフォルダ内）
         self.inventory_csv_path = Path("./csv/supply/物資在庫情報.csv")
@@ -752,6 +753,14 @@ Playerに対して、これらの作業を今から実行することを報告�
                 self.manager.add_message("user", "supply_manager", manager_completion_message, "supply")
 
             manager_return_message = manager_completion_message
+
+            # 保留されていた報告があれば、まとめて送信
+            if self.pending_reports:
+                for report in self.pending_reports:
+                    if hasattr(self, 'manager') and hasattr(self.manager, 'add_message'):
+                        self.manager.add_message("user", "supply_manager", report["message"], "supply",
+                                               from_person="supply_manager", to_person=report["to_person"])
+                self.pending_reports.clear()
 
             self.away_until_time = None
             self.current_task_description = None

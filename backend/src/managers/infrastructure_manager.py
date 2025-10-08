@@ -24,6 +24,7 @@ class InfrastructureManager:
         self.current_task_description = None
         self.pending_inspection = None
         self.pending_restoration = None
+        self.pending_reports = []  # マネージャーが作業中に蓄積される報告
 
         # 知識ファイルのパス
         self.knowledge_path = Path("./src/knowledge/knowledge_infrastructure.txt")

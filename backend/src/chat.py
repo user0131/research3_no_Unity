@@ -293,7 +293,16 @@ class ChatWithMemory:
                 message = supply_return_message
                 to_person = "Player"
             print(f"\n{message}")
-            self.add_message("user", "supply_manager", message, "supply", from_person="supply_manager", to_person=to_person)
+            # マネージャーが利用可能な場合のみPlayerに伝達、そうでなければ保留
+            if self.supply_manager.check_if_available() is None:
+                self.add_message("user", "supply_manager", message, "supply", from_person="supply_manager", to_person=to_person)
+            else:
+                # マネージャーが作業中の場合は報告を保留
+                self.supply_manager.pending_reports.append({
+                    "message": message,
+                    "to_person": to_person,
+                    "timestamp": current_time
+                })
 
         infrastructure_return_message = self.infrastructure_manager.handle_return_from_task()
         if infrastructure_return_message:
@@ -304,7 +313,16 @@ class ChatWithMemory:
                 message = infrastructure_return_message
                 to_person = "Player"
             print(f"\n{message}")
-            self.add_message("user", "infrastructure_manager", message, "infrastructure", from_person="infrastructure_manager", to_person=to_person)
+            # マネージャーが利用可能な場合のみPlayerに伝達、そうでなければ保留
+            if self.infrastructure_manager.check_if_available() is None:
+                self.add_message("user", "infrastructure_manager", message, "infrastructure", from_person="infrastructure_manager", to_person=to_person)
+            else:
+                # マネージャーが作業中の場合は報告を保留
+                self.infrastructure_manager.pending_reports.append({
+                    "message": message,
+                    "to_person": to_person,
+                    "timestamp": current_time
+                })
 
         # 会話中のみ情報付与を一時停止（離席中は情報付与継続）
         if self.info_manager.in_conversation or self.mayor.in_conversation or self.supply_manager.in_conversation or self.infrastructure_manager.in_conversation:
